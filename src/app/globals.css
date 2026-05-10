@@ -28,6 +28,10 @@ body {
   letter-spacing: 0;
 }
 
+html[data-ui-mode-pending="fun"] body > main {
+  visibility: hidden;
+}
+
 button,
 input,
 select {
