@@ -1,6 +1,6 @@
-# Private Theatre Finder
+# HowManySeats?
 
-A Next.js app for finding (currently only Cineplex) showtimes that appear to have zero or very few occupied seats. Results are labeled "likely empty" because seat maps can change quickly and because blocked, accessible-only, house-reserved, and unknown seats are not the same as sold seats.
+A Next.js app for seeing estimated occupied and open seats at nearby Cineplex showtimes.
 
 ## What Is Included
 
@@ -75,3 +75,7 @@ Seat status mapping:
 ## Optional Schema
 
 The original product plan includes Postgres persistence. The schema is kept in `db/migrations/001_init.sql`, but the current app runs directly from live Cineplex preview data and does not require Postgres or Redis.
+
+## Acknowledgment
+
+HowManySeats? was inspired by Riley Walz's [Empty Screenings](https://walzr.com/empty-screenings), which explores the same private-theatre idea.

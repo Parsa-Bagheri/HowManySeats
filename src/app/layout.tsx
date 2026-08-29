@@ -4,8 +4,8 @@ import { UI_MODE_COOKIE_NAME, UI_MODE_STORAGE_KEY } from "@/lib/ui-mode";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "(Probably) Empty Theatres",
-  description: "Find Cineplex showtimes that appear to have very low occupancy."
+  title: "HowManySeats?",
+  description: "Find how many seats are left at nearby Cineplex showtimes."
 };
 
 const uiModeBootstrapScript = `

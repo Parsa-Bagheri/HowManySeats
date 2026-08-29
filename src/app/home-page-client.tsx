@@ -113,7 +113,7 @@ const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
   { value: "time-desc", label: "Time latest first" }
 ];
 
-const FUN_MODE_PROMPT_STORAGE_KEY = "empty-theatres-fun-mode-prompt-seen";
+const FUN_MODE_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 const funInputClass =
@@ -447,9 +447,11 @@ function CleanHomeView({
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-5">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold leading-tight text-white">(Probably) Empty Theatres</h1>
-            <p className="mt-2 text-sm leading-5 text-neutral-300">Use this website to find a quiet theatre near you.</p>
-            <p className="mt-2 text-xs leading-5 text-neutral-400">Idea borrowed from Riley Walz.</p>
+            <h1 className="text-2xl font-semibold leading-tight text-white">
+              <span className="block">How Many</span>{" "}
+              <span className="block">Seats Left?</span>
+            </h1>
+            <p className="mt-2 text-sm leading-5 text-neutral-300">See how many seats are left at nearby Cineplex showtimes.</p>
           </div>
           <div className="shrink-0 sm:ml-auto">
             <ModeSwitchNudge
@@ -573,9 +575,6 @@ function CleanHomeView({
                 <p>{sortLabel(sortBy)}</p>
               </div>
             </div>
-            <p className="mt-4 max-w-3xl text-sm leading-6 text-neutral-300">
-              Results are likely empty, not guaranteed. Accessibility, blocked, house-reserved, and unknown seats are kept out of occupied counts.
-            </p>
           </div>
 
           {error ? (
@@ -586,7 +585,7 @@ function CleanHomeView({
 
           {!loading && hasSearched && !error && results.length === 0 ? (
             <div className="rounded-lg border border-neutral-800 bg-[#111111] p-5 text-sm leading-6 text-neutral-300">
-              No matching likely-empty showtimes were returned for this search. Try clearing the low-occupancy filter or using a future date.
+              No matching showtimes were returned for this search. Try clearing a filter or using another date.
             </div>
           ) : null}
 
@@ -667,17 +666,16 @@ function FunHomeView({
           </div>
           <div className="grid gap-0 lg:grid-cols-[1fr_auto]">
             <div className="hero-blast relative border-b-[6px] border-black bg-[#ff4fa3] p-4 sm:p-7 lg:border-b-0 lg:border-r-[6px]">
-              <h1 className="ransom-title relative max-w-5xl break-words text-[clamp(3rem,9vw,7.75rem)] font-black leading-[0.83] text-black">
-                <span className="inline-block -rotate-1 bg-[#f7e900] px-2 shadow-[6px_6px_0_#111111]">(Probably)</span>{" "}
-                <span className="inline-block rotate-1 bg-white px-2 shadow-[6px_6px_0_#111111]">Empty</span>{" "}
-                <span className="ink-pop inline-block -rotate-2 px-2 text-white">Theatres</span>
+              <h1 className="ransom-title relative max-w-5xl text-[clamp(2.5rem,10vw,7.75rem)] font-black leading-[0.86] text-black">
+                <span className="block whitespace-nowrap">
+                  <span className="inline-block -rotate-1 bg-[#f7e900] px-2 shadow-[6px_6px_0_#111111]">How</span>{" "}
+                  <span className="inline-block rotate-1 bg-white px-2 shadow-[6px_6px_0_#111111]">Many</span>
+                </span>{" "}
+                <span className="mt-3 block whitespace-nowrap">
+                  <span className="ink-pop inline-block -rotate-2 px-2 text-white">Seats</span>{" "}
+                  <span className="inline-block rotate-1 bg-[#00e676] px-2 shadow-[6px_6px_0_#111111]">Left?</span>
+                </span>
               </h1>
-              <p className="hero-diamond-textbox relative mt-5 max-w-3xl text-sm font-black normal-case tracking-[0.08em] text-[#00d5ff]">
-                Why do you want an empty theatre? kinda weird
-              </p>
-              <p className="relative mt-3 inline-flex -rotate-1 border-2 border-black bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] shadow-[3px_3px_0_#111111]">
-                Idea borrowed from Riley Walz
-              </p>
             </div>
             <div className="fun-header-stats grid min-w-0 bg-black text-white sm:grid-cols-2 lg:min-w-64 lg:grid-cols-1">
               <HeaderStat
@@ -702,7 +700,7 @@ function FunHomeView({
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.16em]">Search console</p>
                 <h2 className="mt-1 break-words text-[clamp(1.85rem,5.2vw,3.2rem)] font-black uppercase leading-none">
-                  Find a private (Cineplex) theatre near you, yes you
+                  Find out how many seats are left near you
                 </h2>
               </div>
             </div>
@@ -822,9 +820,6 @@ function FunHomeView({
                     <QueryChip icon={<Filter className="h-4 w-4" aria-hidden="true" />} label={`${activeFilterCount} filters`} />
                     <QueryChip icon={<ArrowDownUp className="h-4 w-4" aria-hidden="true" />} label={sortLabel(sortBy)} />
                   </div>
-                  <p className="max-w-4xl text-sm font-bold leading-6 text-zinc-100">
-                    Results are likely empty, not guaranteed. Accessibility, blocked, house-reserved, and unknown seats are kept out of occupied counts.
-                  </p>
                 </div>
               </div>
             </div>
@@ -839,7 +834,7 @@ function FunHomeView({
 
             {!loading && hasSearched && !error && results.length === 0 ? (
               <div className="border-[6px] border-black bg-white p-5 text-sm font-black uppercase leading-6 shadow-[10px_10px_0_#111111] sm:rotate-1">
-                No matching likely-empty showtimes were returned for this search. Try clearing the low-occupancy filter or using a future date.
+                No matching showtimes were returned for this search. Try clearing a filter or using another date.
               </div>
             ) : null}
 
@@ -913,7 +908,7 @@ function FunSearchLoader() {
             Searching
           </p>
           <p className="mt-4 text-[clamp(1.6rem,4vw,3.2rem)] font-black uppercase leading-none">
-            Pinging every suspiciously empty room
+            Counting seats across nearby theatres
           </p>
         </div>
       </div>
@@ -1344,7 +1339,7 @@ function GoofyLoader() {
             Searching
           </p>
           <p className="mt-4 text-[clamp(2rem,5vw,4rem)] font-black uppercase leading-none">
-            Spinning up the empty-theatre detector
+            Counting every seat still open
           </p>
         </div>
       </div>

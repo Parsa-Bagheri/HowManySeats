@@ -152,7 +152,7 @@ async function geocodeCanadianLocation(input: string): Promise<Coordinates | und
       headers: {
         Accept: "application/json",
         "Accept-Language": "en-CA,en;q=0.9",
-        "User-Agent": "cineplex-likely-empty/0.1 local-search"
+        "User-Agent": "how-many-seats/0.1 local-search"
       },
       signal: controller.signal,
       cache: "force-cache"

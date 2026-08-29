@@ -37,7 +37,7 @@ const defaultFilters: SearchFilters = {
 
 const DEFAULT_SORT_BY: SortOption = "distance-asc";
 
-const STORAGE_KEY = "cineplex-likely-empty-search";
+const STORAGE_KEY = "how-many-seats-search";
 
 export function makeDefaultSearchState(today = getLocalDateInputValue()): SearchState {
   return {
