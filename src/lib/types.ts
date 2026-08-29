@@ -1,3 +1,5 @@
+import type { ShowtimeExperienceType } from "./experience-types";
+
 export type SeatStatus =
   | "available"
   | "sold"
@@ -66,8 +68,12 @@ export type MovieSuggestion = {
 export type SearchQuery = {
   location: string;
   date: string;
+  endDate?: string;
   radiusKm: number;
+  latitude?: number;
+  longitude?: number;
   movieTitle?: string;
+  experienceTypes?: ShowtimeExperienceType[];
   onlyZeroSold?: boolean;
   maxFiveSold?: boolean;
   startsInNextTwoHours?: boolean;

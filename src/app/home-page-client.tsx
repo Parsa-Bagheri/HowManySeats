@@ -3,6 +3,7 @@
 import {
   ArrowDownUp,
   CalendarDays,
+  ChevronDown,
   Clock,
   ExternalLink,
   Filter,
@@ -24,6 +25,12 @@ import {
   useRef,
   useState
 } from "react";
+import AddressField, { type LocationCoordinates } from "@/app/address-field";
+import { addDays, formatDateRangeLabel, normalizeEndDate } from "@/lib/date-range";
+import {
+  SHOWTIME_EXPERIENCE_TYPES,
+  type ShowtimeExperienceType
+} from "@/lib/experience-types";
 import { formatConfidence } from "@/lib/seat-scoring";
 import {
   buildSearchParams,
@@ -52,7 +59,9 @@ type HomePageClientProps = {
 type SearchViewProps = {
   activeFilterCount: number;
   date: string;
+  endDate: string;
   error: string | undefined;
+  experienceTypes: ShowtimeExperienceType[];
   filters: SearchFilters;
   hasSearched: boolean;
   loading: boolean;
@@ -69,7 +78,8 @@ type SearchViewProps = {
   results: SearchResult[];
   selectedDateIsToday: boolean;
   setFilters: Dispatch<SetStateAction<SearchFilters>>;
-  setLocation: (value: string) => void;
+  setExperienceTypes: Dispatch<SetStateAction<ShowtimeExperienceType[]>>;
+  setLocation: (value: string, coordinates?: LocationCoordinates) => void;
   setMovieTitle: (value: string) => void;
   setRadiusKm: (value: string) => void;
   setSortBy: (value: SortOption) => void;
@@ -78,7 +88,8 @@ type SearchViewProps = {
   sortBy: SortOption;
   uiMode: UiMode;
   onDismissFunModePrompt: () => void;
-  updateDate: (value: string) => void;
+  updateEndDate: (value: string) => void;
+  updateStartDate: (value: string) => void;
 };
 
 type FilterOption = {
@@ -115,8 +126,12 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
   const initialState = useMemo(() => makeDefaultSearchState(), []);
   const [location, setLocation] = useState(initialState.location);
   const [date, setDate] = useState(initialState.date);
+  const [endDate, setEndDate] = useState(initialState.endDate);
+  const [latitude, setLatitude] = useState(initialState.latitude);
+  const [longitude, setLongitude] = useState(initialState.longitude);
   const [radiusKm, setRadiusKm] = useState(initialState.radiusKm);
   const [movieTitle, setMovieTitle] = useState(initialState.movieTitle);
+  const [experienceTypes, setExperienceTypes] = useState<ShowtimeExperienceType[]>(initialState.experienceTypes);
   const [movieSuggestions, setMovieSuggestions] = useState<MovieSuggestion[]>([]);
   const [movieSuggestionsLoading, setMovieSuggestionsLoading] = useState(false);
   const [movieSuggestionsOpen, setMovieSuggestionsOpen] = useState(false);
@@ -132,9 +147,21 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
   const movieTitleFocused = useRef(false);
   const skipNextMovieSuggestionFetch = useRef(false);
 
-  const searchState: SearchState = { location, date, radiusKm, movieTitle, sortBy, filters };
-  const selectedDateIsToday = date === today;
-  const activeFilterCount = Object.values(getEffectiveFilters(searchState, today)).filter(Boolean).length;
+  const searchState: SearchState = {
+    location,
+    date,
+    endDate,
+    radiusKm,
+    latitude,
+    longitude,
+    movieTitle,
+    experienceTypes,
+    sortBy,
+    filters
+  };
+  const selectedDateIsToday = date === today && endDate === today;
+  const activeFilterCount =
+    Object.values(getEffectiveFilters(searchState, today)).filter(Boolean).length + experienceTypes.length;
 
   const setUiMode = useCallback((mode: UiMode) => {
     setUiModeState(mode);
@@ -143,6 +170,12 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
 
   const dismissFunModePrompt = useCallback(() => {
     setShowFunModePrompt(false);
+  }, []);
+
+  const updateLocation = useCallback((value: string, coordinates?: LocationCoordinates) => {
+    setLocation(value);
+    setLatitude(coordinates?.latitude);
+    setLongitude(coordinates?.longitude);
   }, []);
 
   const updateMovieTitle = useCallback((value: string) => {
@@ -222,8 +255,12 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
     const state = normalizeSearchState(saved);
     setLocation(state.location);
     setDate(state.date);
+    setEndDate(state.endDate);
+    setLatitude(state.latitude);
+    setLongitude(state.longitude);
     setRadiusKm(state.radiusKm);
     setMovieTitle(state.movieTitle);
+    setExperienceTypes(state.experienceTypes);
     setSortBy(state.sortBy);
     setFilters(state.filters);
     setHasSearched(false);
@@ -237,7 +274,7 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
     }
 
     rememberSearchState(window.localStorage, searchState, hasSearched);
-  }, [date, filters, hasSearched, location, movieTitle, radiusKm, sortBy]);
+  }, [date, endDate, experienceTypes, filters, hasSearched, latitude, location, longitude, movieTitle, radiusKm, sortBy]);
 
   useEffect(() => {
     const query = movieTitle.trim();
@@ -263,10 +300,16 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
         const params = new URLSearchParams({
           location,
           date,
+          endDate,
           radiusKm,
           query,
           limit: "8"
         });
+
+        if (latitude !== undefined && longitude !== undefined) {
+          params.set("latitude", String(latitude));
+          params.set("longitude", String(longitude));
+        }
         const response = await fetch(`/api/movie-suggestions?${params.toString()}`, {
           signal: controller.signal
         });
@@ -293,17 +336,28 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [date, location, movieTitle, radiusKm]);
+  }, [date, endDate, latitude, location, longitude, movieTitle, radiusKm]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await executeSearch(searchState);
   }
 
-  function updateDate(value: string) {
+  function updateStartDate(value: string) {
+    const nextEndDate = value ? normalizeEndDate(value, endDate) : endDate;
     setDate(value);
+    setEndDate(nextEndDate);
 
-    if (value !== today) {
+    if (value !== today || nextEndDate !== today) {
+      setFilters((current) => ({ ...current, startsInNextTwoHours: false }));
+    }
+  }
+
+  function updateEndDate(value: string) {
+    const nextEndDate = normalizeEndDate(date, value);
+    setEndDate(nextEndDate);
+
+    if (date !== today || nextEndDate !== today) {
       setFilters((current) => ({ ...current, startsInNextTwoHours: false }));
     }
   }
@@ -311,7 +365,9 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
   const viewProps: SearchViewProps = {
     activeFilterCount,
     date,
+    endDate,
     error,
+    experienceTypes,
     filters,
     hasSearched,
     loading,
@@ -328,7 +384,8 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
     results,
     selectedDateIsToday,
     setFilters,
-    setLocation,
+    setExperienceTypes,
+    setLocation: updateLocation,
     setMovieTitle: updateMovieTitle,
     setRadiusKm,
     setSortBy,
@@ -337,7 +394,8 @@ export default function HomePageClient({ hasInitialUiModeCookie, initialUiMode }
     sortBy,
     uiMode,
     onDismissFunModePrompt: dismissFunModePrompt,
-    updateDate
+    updateEndDate,
+    updateStartDate
   };
 
   return uiMode === "fun" ? <FunHomeView {...viewProps} /> : <CleanHomeView {...viewProps} />;
@@ -352,7 +410,9 @@ function rememberUiModePreference(mode: UiMode) {
 function CleanHomeView({
   activeFilterCount,
   date,
+  endDate,
   error,
+  experienceTypes,
   filters,
   hasSearched,
   loading,
@@ -369,6 +429,7 @@ function CleanHomeView({
   results,
   selectedDateIsToday,
   setFilters,
+  setExperienceTypes,
   setLocation,
   setMovieTitle,
   setRadiusKm,
@@ -378,7 +439,8 @@ function CleanHomeView({
   sortBy,
   uiMode,
   onDismissFunModePrompt,
-  updateDate
+  updateEndDate,
+  updateStartDate
 }: SearchViewProps) {
   return (
     <main className="flex min-h-screen flex-col bg-[#050505] px-4 py-5 text-neutral-100 sm:px-6 lg:px-8">
@@ -402,42 +464,48 @@ function CleanHomeView({
         <div className="grid w-full flex-1 gap-5 lg:grid-cols-[380px_1fr]">
         <section className="rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_18px_70px_rgba(0,0,0,0.45)]">
           <form className="grid gap-4" onSubmit={onSubmit}>
-            <label className="grid gap-1.5 text-sm font-medium text-neutral-200">
-              City, postal code, or province
-              <input
-                className="focus-ring h-10 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white placeholder:text-neutral-500"
-                value={location}
-                onChange={(event) => setLocation(event.target.value)}
-                required
-              />
-            </label>
+            <AddressField mode="clean" value={location} onChange={setLocation} />
 
-            <div className="grid grid-cols-[1fr_120px] gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1.5 text-sm font-medium text-neutral-200">
-                Date
+                Start date
                 <input
                   className="focus-ring h-10 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white"
                   type="date"
                   value={date}
-                  onChange={(event) => updateDate(event.target.value)}
+                  min={getLocalDateInputValue()}
+                  onChange={(event) => updateStartDate(event.target.value)}
                   required
                 />
               </label>
 
               <label className="grid gap-1.5 text-sm font-medium text-neutral-200">
-                Radius
-                <select
+                End date
+                <input
                   className="focus-ring h-10 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white"
-                  value={radiusKm}
-                  onChange={(event) => setRadiusKm(event.target.value)}
-                >
-                  <option value="10">10 km</option>
-                  <option value="25">25 km</option>
-                  <option value="50">50 km</option>
-                  <option value="100">100 km</option>
-                </select>
+                  type="date"
+                  value={endDate}
+                  min={date}
+                  max={addDays(date, 2)}
+                  onChange={(event) => updateEndDate(event.target.value)}
+                  required
+                />
               </label>
             </div>
+
+            <label className="grid gap-1.5 text-sm font-medium text-neutral-200">
+              Radius
+              <select
+                className="focus-ring h-10 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white"
+                value={radiusKm}
+                onChange={(event) => setRadiusKm(event.target.value)}
+              >
+                <option value="10">10 km</option>
+                <option value="25">25 km</option>
+                <option value="50">50 km</option>
+                <option value="100">100 km</option>
+              </select>
+            </label>
 
             <label className="grid gap-1.5 text-sm font-medium text-neutral-200">
               Sort by
@@ -464,6 +532,12 @@ function CleanHomeView({
               onChange={setMovieTitle}
               onFocus={onMovieTitleFocus}
               onSelect={onMovieSuggestionSelect}
+            />
+
+            <TheatreTypeField
+              mode="clean"
+              selectedTypes={experienceTypes}
+              setSelectedTypes={setExperienceTypes}
             />
 
             <fieldset className="grid gap-2 rounded-md border border-neutral-800 bg-[#151515] p-3">
@@ -494,7 +568,7 @@ function CleanHomeView({
                 <p className="mt-1 text-3xl font-semibold text-white">{resultCount(results, loading)}</p>
               </div>
               <div className="text-right text-sm text-neutral-400">
-                <p>{location.trim() || "No location"} - {date}</p>
+                <p>{location.trim() || "No location"} - {formatDateRangeLabel(date, endDate)}</p>
                 <p>{activeFilterCount} active filter{activeFilterCount === 1 ? "" : "s"}</p>
                 <p>{sortLabel(sortBy)}</p>
               </div>
@@ -535,7 +609,9 @@ function CleanHomeView({
 function FunHomeView({
   activeFilterCount,
   date,
+  endDate,
   error,
+  experienceTypes,
   filters,
   hasSearched,
   loading,
@@ -552,6 +628,7 @@ function FunHomeView({
   results,
   selectedDateIsToday,
   setFilters,
+  setExperienceTypes,
   setLocation,
   setMovieTitle,
   setRadiusKm,
@@ -561,7 +638,8 @@ function FunHomeView({
   sortBy,
   uiMode,
   onDismissFunModePrompt,
-  updateDate
+  updateEndDate,
+  updateStartDate
 }: SearchViewProps) {
   return (
     <main className="chaos-stage min-h-screen overflow-hidden px-3 py-4 text-black sm:px-5 lg:px-8">
@@ -611,7 +689,7 @@ function FunHomeView({
               <HeaderStat
                 icon={<CalendarDays className="h-5 w-5" aria-hidden="true" />}
                 label="Date"
-                value={date}
+                value={formatDateRangeLabel(date, endDate)}
                 accent="bg-[#00d5ff]"
               />
             </div>
@@ -630,42 +708,48 @@ function FunHomeView({
             </div>
 
             <form className="grid gap-4" onSubmit={onSubmit}>
-              <label className="grid gap-2 text-sm font-black uppercase">
-                City, postal code, or province
-                <input
-                  className={funInputClass}
-                  value={location}
-                  onChange={(event) => setLocation(event.target.value)}
-                  required
-                />
-              </label>
+              <AddressField mode="fun" value={location} onChange={setLocation} />
 
-              <div className="grid gap-4 sm:grid-cols-[1fr_130px] xl:grid-cols-[1fr_130px]">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <label className="grid gap-2 text-sm font-black uppercase">
-                  Date
+                  Start date
                   <input
                     className={funInputClass}
                     type="date"
                     value={date}
-                    onChange={(event) => updateDate(event.target.value)}
+                    min={getLocalDateInputValue()}
+                    onChange={(event) => updateStartDate(event.target.value)}
                     required
                   />
                 </label>
 
                 <label className="grid gap-2 text-sm font-black uppercase">
-                  Radius
-                  <select
+                  End date
+                  <input
                     className={funInputClass}
-                    value={radiusKm}
-                    onChange={(event) => setRadiusKm(event.target.value)}
-                  >
-                    <option value="10">10 km</option>
-                    <option value="25">25 km</option>
-                    <option value="50">50 km</option>
-                    <option value="100">100 km</option>
-                  </select>
+                    type="date"
+                    value={endDate}
+                    min={date}
+                    max={addDays(date, 2)}
+                    onChange={(event) => updateEndDate(event.target.value)}
+                    required
+                  />
                 </label>
               </div>
+
+              <label className="grid gap-2 text-sm font-black uppercase">
+                Radius
+                <select
+                  className={funInputClass}
+                  value={radiusKm}
+                  onChange={(event) => setRadiusKm(event.target.value)}
+                >
+                  <option value="10">10 km</option>
+                  <option value="25">25 km</option>
+                  <option value="50">50 km</option>
+                  <option value="100">100 km</option>
+                </select>
+              </label>
 
               <label className="grid gap-2 text-sm font-black uppercase">
                 Sort by
@@ -692,6 +776,12 @@ function FunHomeView({
                 onChange={setMovieTitle}
                 onFocus={onMovieTitleFocus}
                 onSelect={onMovieSuggestionSelect}
+              />
+
+              <TheatreTypeField
+                mode="fun"
+                selectedTypes={experienceTypes}
+                setSelectedTypes={setExperienceTypes}
               />
 
               <fieldset className="grid gap-3 border-[6px] border-black bg-[#ff4fa3] p-3 shadow-[8px_8px_0_#111111]">
@@ -727,7 +817,7 @@ function FunHomeView({
                 <div className="grid gap-4 p-5 lg:pr-12">
                   <div className="flex flex-wrap gap-3">
                     <QueryChip icon={<MapPin className="h-4 w-4" aria-hidden="true" />} label={location.trim() || "No location"} />
-                    <QueryChip icon={<CalendarDays className="h-4 w-4" aria-hidden="true" />} label={date} />
+                    <QueryChip icon={<CalendarDays className="h-4 w-4" aria-hidden="true" />} label={formatDateRangeLabel(date, endDate)} />
                     <QueryChip icon={<Radar className="h-4 w-4" aria-hidden="true" />} label={`${radiusKm} km`} />
                     <QueryChip icon={<Filter className="h-4 w-4" aria-hidden="true" />} label={`${activeFilterCount} filters`} />
                     <QueryChip icon={<ArrowDownUp className="h-4 w-4" aria-hidden="true" />} label={sortLabel(sortBy)} />
@@ -865,12 +955,12 @@ function ModeSwitchNudge({
         <span className={bubbleClass} role="status" aria-live="polite">
           <span className="flex items-start gap-2 pr-7">
             <Sparkles className={isFun ? "mt-0.5 h-4 w-4 shrink-0" : "mt-0.5 h-4 w-4 shrink-0 text-amber-300"} aria-hidden="true" />
-            <span>{isFun ? "Fun Mode is on. Use this switch to tone it down." : "Flip this switch for Fun Mode."}</span>
+            <span>{isFun ? "Theme 2 is on. Use this switch to return to theme 1." : "Switch to theme 2."}</span>
           </span>
           <button
             className={isFun ? "focus-ring absolute right-2 top-2 grid h-7 w-7 place-items-center border-2 border-black bg-white" : "focus-ring absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md border border-neutral-700 text-neutral-300"}
             type="button"
-            aria-label="Dismiss fun mode hint"
+            aria-label="Dismiss themes hint"
             onClick={onDismiss}
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -904,16 +994,16 @@ function ModeSwitch({ uiMode, onChange }: { uiMode: UiMode; onChange: (mode: UiM
           type="button"
           role="switch"
           aria-checked="true"
-          title="Fun mode"
+          title="Themes: 2"
           onClick={() => onChange(nextMode)}
         >
           <span className="inline-flex items-center gap-2 px-2">
             <Sparkles className="h-4 w-4" aria-hidden="true" />
-            Fun mode
+            THEMES
           </span>
           <span className="relative grid h-9 w-32 grid-cols-2 overflow-hidden rounded-full border-4 border-black bg-[#f7e900] text-[10px] leading-none shadow-[3px_3px_0_#111111]">
-            <span className="relative z-10 grid place-items-center px-2 transition hover:bg-[#ff8a00] hover:text-black">Off</span>
-            <span className="relative z-10 grid place-items-center px-2 transition hover:bg-[#00e676]">On</span>
+            <span className="relative z-10 grid place-items-center px-2 transition hover:bg-[#ff8a00] hover:text-black">1</span>
+            <span className="relative z-10 grid place-items-center px-2 transition hover:bg-[#00e676]">2</span>
             <span className="absolute bottom-1 right-1 top-1 w-[calc(50%-4px)] rounded-full bg-[#00d5ff]" aria-hidden="true" />
           </span>
         </button>
@@ -927,16 +1017,16 @@ function ModeSwitch({ uiMode, onChange }: { uiMode: UiMode; onChange: (mode: UiM
       type="button"
       role="switch"
       aria-checked="false"
-      title="Fun mode"
+      title="Themes: 1"
       onClick={() => onChange(nextMode)}
     >
-      <span className="px-1">Fun mode</span>
+      <span className="px-1">THEMES</span>
       <span
         className="relative grid h-7 w-24 grid-cols-2 overflow-hidden rounded-full border border-neutral-600 bg-neutral-950 text-[12px] font-bold leading-none shadow-inner"
         aria-hidden="true"
       >
-        <span className="relative z-10 grid place-items-center text-black transition hover:bg-white/80">O</span>
-        <span className="relative z-10 grid place-items-center text-neutral-400 transition hover:bg-amber-300/15 hover:text-amber-100">I</span>
+        <span className="relative z-10 grid place-items-center text-black transition hover:bg-white/80">1</span>
+        <span className="relative z-10 grid place-items-center text-neutral-400 transition hover:bg-amber-300/15 hover:text-amber-100">2</span>
         <span className="absolute bottom-0.5 left-0.5 top-0.5 w-[calc(50%-2px)] rounded-full bg-neutral-200" aria-hidden="true" />
       </span>
     </button>
@@ -1039,6 +1129,70 @@ function MovieTitleField({
   );
 }
 
+function TheatreTypeField({
+  mode,
+  selectedTypes,
+  setSelectedTypes
+}: {
+  mode: UiMode;
+  selectedTypes: ShowtimeExperienceType[];
+  setSelectedTypes: Dispatch<SetStateAction<ShowtimeExperienceType[]>>;
+}) {
+  const isFun = mode === "fun";
+  const detailsClass = isFun ? "relative text-sm font-black uppercase" : "relative text-sm font-medium text-neutral-200";
+  const summaryClass = isFun
+    ? `${funInputClass} flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden`
+    : "focus-ring flex h-10 cursor-pointer list-none items-center justify-between gap-3 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white [&::-webkit-details-marker]:hidden";
+  const panelClass = isFun
+    ? "absolute left-0 right-0 top-full z-30 mt-2 grid max-h-72 gap-2 overflow-auto border-4 border-black bg-[#fff8df] p-3 text-black shadow-[7px_7px_0_#111111]"
+    : "absolute left-0 right-0 top-full z-30 mt-1 grid max-h-72 gap-2 overflow-auto rounded-md border border-neutral-700 bg-[#111111] p-3 shadow-[0_16px_40px_rgba(0,0,0,0.45)]";
+
+  function toggleType(experienceType: ShowtimeExperienceType, checked: boolean) {
+    setSelectedTypes((current) =>
+      SHOWTIME_EXPERIENCE_TYPES.filter((option) =>
+        checked ? option === experienceType || current.includes(option) : option !== experienceType && current.includes(option)
+      )
+    );
+  }
+
+  return (
+    <div className="grid gap-1.5">
+      <span className={isFun ? "text-sm font-black uppercase" : "text-sm font-medium text-neutral-200"}>Theatre type</span>
+      <details className={detailsClass}>
+        <summary className={summaryClass}>
+          <span>{selectedTypes.length ? `${selectedTypes.length} selected` : "No filter"}</span>
+          <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+        </summary>
+        <div className={panelClass}>
+          {selectedTypes.length ? (
+            <button
+              className={isFun ? "focus-ring justify-self-start border-2 border-black bg-white px-2 py-1 text-xs" : "focus-ring justify-self-start rounded border border-neutral-600 px-2 py-1 text-xs text-neutral-300"}
+              type="button"
+              onClick={() => setSelectedTypes([])}
+            >
+              Clear all
+            </button>
+          ) : null}
+          {SHOWTIME_EXPERIENCE_TYPES.map((experienceType) => (
+            <label
+              className={isFun ? "flex min-h-9 items-center justify-between gap-3 border-2 border-black bg-white px-2 py-1" : "flex min-h-8 items-center justify-between gap-3 text-neutral-200"}
+              key={experienceType}
+            >
+              <span>{experienceType}</span>
+              <input
+                className={isFun ? "h-5 w-5 accent-[#ff4fa3]" : "h-4 w-4 accent-amber-300"}
+                type="checkbox"
+                checked={selectedTypes.includes(experienceType)}
+                onChange={(event) => toggleType(experienceType, event.target.checked)}
+              />
+            </label>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function CleanFilterToggle({
   checked,
   disabled = false,
@@ -1094,6 +1248,7 @@ function CleanResultCard({ result }: { result: SearchResult }) {
         <div>
           <p className="flex items-center gap-2 font-semibold text-neutral-100">
             <Clock className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+            {startsAt.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} at{" "}
             {startsAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} - {result.showtime.movieTitle}
           </p>
           <p className="mt-1 text-sm text-neutral-400">
@@ -1264,6 +1419,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
           <div>
             <p className="flex flex-wrap items-center gap-2 text-xl font-black uppercase leading-tight">
               <Clock className="h-5 w-5 text-[#00a651]" aria-hidden="true" />
+              <span>{startsAt.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}</span>
               <span>{startsAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
               <span>{result.showtime.movieTitle}</span>
             </p>

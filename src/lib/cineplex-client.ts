@@ -1,4 +1,6 @@
 import { distanceKm, getProvinceCode, resolveLocation, type Coordinates } from "./geo";
+import { getSearchDates } from "./date-range";
+import { showtimeMatchesExperienceTypes } from "./experience-types";
 import { buildSeatSnapshot } from "./seat-scoring";
 import type {
   MovieSuggestion,
@@ -102,7 +104,10 @@ type ShowtimeCandidate = {
   distanceKm?: number;
 };
 
-type MovieSuggestionQuery = Pick<SearchQuery, "location" | "date" | "radiusKm"> & {
+type MovieSuggestionQuery = Pick<
+  SearchQuery,
+  "location" | "date" | "endDate" | "radiusKm" | "latitude" | "longitude"
+> & {
   movieTitle: string;
   limit?: number;
 };
@@ -119,25 +124,35 @@ export class CineplexClient {
 
   async search(query: SearchQuery): Promise<SearchResult[]> {
     const { origin, theatres } = await this.resolveSearchArea(query);
+    const searchDates = getSearchDates(query.date, query.endDate ?? query.date) ?? [query.date];
     const maxTheatres = Number(process.env.CINEPLEX_MAX_THEATRES_PER_SEARCH ?? 5);
     const maxSeatChecks = Number(process.env.CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH ?? 40);
-    const candidates: ShowtimeCandidate[] = [];
+    const candidatesByDate = new Map(searchDates.map((date) => [date, [] as ShowtimeCandidate[]]));
     const results: SearchResult[] = [];
 
     for (const theatre of theatres.slice(0, maxTheatres)) {
-      const showtimes = await this.getShowtimes(theatre, query.date);
-      const matchingShowtimes = this.filterShowtimes(showtimes, query);
+      const showtimesByDate = await Promise.all(
+        searchDates.map(async (date) => ({ date, showtimes: await this.getShowtimes(theatre, date) }))
+      );
 
-      for (const showtime of matchingShowtimes) {
-        candidates.push({
-          theatre,
-          showtime,
-          distanceKm: getDistanceFromOrigin(origin, theatre)
-        });
+      for (const { date, showtimes } of showtimesByDate) {
+        const matchingShowtimes = this.filterShowtimes(showtimes, query);
+
+        for (const showtime of matchingShowtimes) {
+          candidatesByDate.get(date)?.push({
+            theatre,
+            showtime,
+            distanceKm: getDistanceFromOrigin(origin, theatre)
+          });
+        }
       }
     }
 
-    for (const candidate of sortShowtimeCandidates(candidates, query.sortBy ?? "distance-asc").slice(0, maxSeatChecks)) {
+    const candidateGroups = searchDates.map((date) =>
+      sortShowtimeCandidates(candidatesByDate.get(date) ?? [], query.sortBy ?? "distance-asc")
+    );
+
+    for (const candidate of interleaveCandidates(candidateGroups).slice(0, maxSeatChecks)) {
       const snapshot = await this.getSeatSnapshot(candidate.theatre, candidate.showtime);
       const result = {
         theatre: candidate.theatre,
@@ -154,7 +169,9 @@ export class CineplexClient {
     return sortResults(results, query.sortBy ?? "distance-asc");
   }
 
-  async findTheatres(query: Pick<SearchQuery, "location" | "radiusKm">): Promise<Theatre[]> {
+  async findTheatres(
+    query: Pick<SearchQuery, "location" | "radiusKm" | "latitude" | "longitude">
+  ): Promise<Theatre[]> {
     return (await this.resolveSearchArea(query)).theatres;
   }
 
@@ -167,11 +184,14 @@ export class CineplexClient {
 
     const maxTheatres = Number(process.env.CINEPLEX_MAX_THEATRES_PER_SUGGESTIONS ?? 8);
     const limit = query.limit ?? 8;
+    const searchDates = getSearchDates(query.date, query.endDate ?? query.date) ?? [query.date];
     const theatres = await this.findTheatres(query);
     const showtimeGroups = await Promise.all(
       theatres.slice(0, maxTheatres).map(async (theatre) => ({
         theatre,
-        showtimes: await this.getShowtimes(theatre, query.date)
+        showtimes: dedupeShowtimes(
+          (await Promise.all(searchDates.map((date) => this.getShowtimes(theatre, date)))).flat()
+        )
       }))
     );
     const suggestionsByTitle = new Map<string, { title: string; theatreIds: Set<string>; showtimeCount: number }>();
@@ -206,7 +226,7 @@ export class CineplexClient {
   }
 
   private async resolveSearchArea(
-    query: Pick<SearchQuery, "location" | "radiusKm">
+    query: Pick<SearchQuery, "location" | "radiusKm" | "latitude" | "longitude">
   ): Promise<{ origin?: Coordinates; theatres: Theatre[] }> {
     const response = await this.getJson<CineplexTheatresResponse>(
       `${THEATRICAL_API_BASE}/v1/theatres?language=en`
@@ -217,7 +237,10 @@ export class CineplexClient {
       ...(response.otherTheatres ?? [])
     ];
     const theatres = rawTheatres.map(toTheatre).filter((theatre) => Boolean(theatre.cineplexId));
-    const coordinates = await resolveLocation(query.location);
+    const coordinates =
+      query.latitude !== undefined && query.longitude !== undefined
+        ? { latitude: query.latitude, longitude: query.longitude }
+        : await resolveLocation(query.location);
     const text = query.location.trim().toLowerCase();
     const provinceCode = getProvinceCode(text);
     const textMatches = theatres.filter((theatre) => matchesTheatreText(theatre, text));
@@ -351,6 +374,10 @@ export class CineplexClient {
         return false;
       }
 
+      if (!showtimeMatchesExperienceTypes(showtime.format, query.experienceTypes ?? [])) {
+        return false;
+      }
+
       if (!query.startsInNextTwoHours) {
         return true;
       }
@@ -401,6 +428,27 @@ function sortShowtimeCandidates(candidates: ShowtimeCandidate[], sortBy: SortOpt
       compareOptionalNumber(a.distanceKm, b.distanceKm, 1)
     );
   });
+}
+
+function interleaveCandidates(groups: ShowtimeCandidate[][]): ShowtimeCandidate[] {
+  const interleaved: ShowtimeCandidate[] = [];
+  const longestGroup = Math.max(0, ...groups.map((group) => group.length));
+
+  for (let index = 0; index < longestGroup; index += 1) {
+    for (const group of groups) {
+      const candidate = group[index];
+
+      if (candidate) {
+        interleaved.push(candidate);
+      }
+    }
+  }
+
+  return interleaved;
+}
+
+function dedupeShowtimes(showtimes: Showtime[]): Showtime[] {
+  return Array.from(new Map(showtimes.map((showtime) => [showtime.id, showtime])).values());
 }
 
 function compareShowtime(a: SearchResult, b: SearchResult, direction: number): number {

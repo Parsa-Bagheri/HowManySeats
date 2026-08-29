@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CineplexClient } from "@/lib/cineplex-client";
+import { getSearchDates, isValidDateInput } from "@/lib/date-range";
+import { parseShowtimeExperienceTypes } from "@/lib/experience-types";
 import type { SearchResult } from "@/lib/types";
 
 const booleanParam = z
@@ -10,9 +12,16 @@ const booleanParam = z
 
 const searchSchema = z.object({
   location: z.string().min(1),
-  date: z.string().min(10),
+  date: z.string().refine(isValidDateInput),
+  endDate: z.string().refine(isValidDateInput).optional(),
   radiusKm: z.coerce.number().min(1).max(250),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
   movieTitle: z.string().optional(),
+  experienceTypes: z
+    .string()
+    .optional()
+    .transform((value) => parseShowtimeExperienceTypes(value ? [value] : [])),
   onlyZeroSold: booleanParam,
   maxFiveSold: booleanParam,
   startsInNextTwoHours: booleanParam,
@@ -35,8 +44,29 @@ export async function GET(request: Request) {
     );
   }
 
+  const hasCompleteCoordinates =
+    (parsed.data.latitude === undefined && parsed.data.longitude === undefined) ||
+    (parsed.data.latitude !== undefined && parsed.data.longitude !== undefined);
+  const dates = getSearchDates(parsed.data.date, parsed.data.endDate ?? parsed.data.date);
+
+  if (!dates || !hasCompleteCoordinates) {
+    return NextResponse.json(
+      {
+        error: "Invalid search query",
+        issues: {
+          dateRange: dates ? undefined : "Date range must contain one to three inclusive days.",
+          coordinates: hasCompleteCoordinates ? undefined : "Latitude and longitude must be provided together."
+        }
+      },
+      { status: 400 }
+    );
+  }
+
   try {
-    const results = await new CineplexClient().search(parsed.data);
+    const results = await new CineplexClient().search({
+      ...parsed.data,
+      endDate: parsed.data.endDate ?? parsed.data.date
+    });
 
     return NextResponse.json({ results: results.map(toUiResult) });
   } catch (error) {

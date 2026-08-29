@@ -5,6 +5,8 @@ A Next.js app for finding (currently only Cineplex) showtimes that appear to hav
 ## What Is Included
 
 - Next.js + Tailwind search UI
+- Optional Google Maps address suggestions with a manual-input fallback
+- One-to-three-day searches and multi-select theatre-format filtering
 - Node.js/TypeScript API route
 - CLI collector using live Cineplex showtime and preview seat occupancy data
 - Seat classifier and confidence scoring
@@ -27,6 +29,10 @@ npm run dev
 ```
 
 Open http://localhost:3000.
+
+To enable Google Maps address suggestions, add a browser-restricted Google Maps API key to
+`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. Enable Maps JavaScript API and Places API (New) for that key.
+Without it, the same field remains available as a normal address, postal-code, or city input.
 
 ## CLI
 
