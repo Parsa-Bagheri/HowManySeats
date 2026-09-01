@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildSeatSnapshot } from "./seat-scoring";
 
-test("classifies sellable, blocked, accessibility, and unknown seats", () => {
-  const snapshot = buildSeatSnapshot("showtime-1", [
+test("counts sellable, occupied, and accessible seats", () => {
+  const snapshot = buildSeatSnapshot([
     { status: "Available", type: "Standard" },
     { status: "Occupied", type: "Standard" },
     { status: "Held", type: "Standard" },
@@ -13,12 +13,7 @@ test("classifies sellable, blocked, accessibility, and unknown seats", () => {
     { status: "Mystery", type: "Standard" },
   ]);
 
-  assert.equal(snapshot.totalSeats, 7);
   assert.equal(snapshot.sellableSeats, 3);
-  assert.equal(snapshot.availableCount, 1);
   assert.equal(snapshot.occupiedEstimate, 2);
-  assert.equal(snapshot.blockedCount, 1);
   assert.equal(snapshot.accessibilityCount, 2);
-  assert.equal(snapshot.unknownCount, 1);
-  assert.equal(snapshot.confidence, "low-but-interesting");
 });

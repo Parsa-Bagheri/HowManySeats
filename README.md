@@ -21,8 +21,7 @@ Cineplex.
   within two hours, non-VIP showtimes, and accessible seating
 - Distance and start-time sorting
 - Direct links to Cineplex's public purchase flow and seat-map preview
-- Separate tracking for available, occupied, blocked, accessible, and unknown
-  seats
+- Counts for sellable, occupied, and accessible seats
 
 ## How it works
 
@@ -37,19 +36,15 @@ GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout
 GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true
 ```
 
-It does not call seat-reservation, ticket-selection, cart, payment, sign-in, or
-checkout endpoints.
-
 ## Seat estimates
 
 The estimate is derived from the current preview seat map:
 
 - `Available` standard seats count as open.
-- `Occupied` and held standard seats count toward the occupied estimate.
-- Broken, blocked, unavailable, and house-reserved seats are tracked as
-  blocked rather than occupied.
-- Wheelchair and companion seats are tracked separately as accessible seats.
-- Unrecognized and post-showtime values are tracked as unknown.
+- `Occupied`, `Sold`, `Held`, and `Reserved` standard seats count toward the
+  occupied estimate.
+- Wheelchair and companion seats count as accessible seats. Other seat types
+  and statuses are excluded from the estimate.
 
 Seat availability can change at any time. Treat the numbers as a snapshot, not
 as a guarantee from Cineplex.
@@ -99,7 +94,6 @@ the address field remains a standard manual-entry field.
 ```text
 src/app/       Next.js pages, UI, styles, and API routes
 src/lib/       Cineplex client, search logic, geocoding, and seat scoring
-docs/          Technical discovery and compliance notes
 ```
 
 Tests are colocated with the library modules as `*.test.ts` files.

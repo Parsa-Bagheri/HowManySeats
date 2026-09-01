@@ -23,13 +23,6 @@ const TICKETING_API_BASE = "https://apis.cineplex.com/prod/ticketing/api";
 const PUBLIC_SITE_KEY = "dcdac5601d864addbc2675a2e96cb1f8";
 const SEAT_CHECK_CONCURRENCY = 4;
 const MAX_SUGGESTION_THEATRES = 8;
-const CONFIDENCE_RANK: Record<SeatSnapshot["confidence"], number> = {
-  high: 0,
-  medium: 1,
-  "low-but-interesting": 2,
-  "not-empty": 3,
-  unknown: 4,
-};
 
 type CineplexTheatresResponse = {
   favouriteTheatres?: CineplexTheatre[];
@@ -95,7 +88,6 @@ type SeatLayout = {
 
 type SeatAvailability = {
   seatAvailabilities?: Record<string, string>;
-  isPostShowtime?: boolean;
 };
 
 type ShowtimeCandidate = {
@@ -199,15 +191,6 @@ export class CineplexClient {
     return sortResults(results, sortBy);
   }
 
-  async findTheatres(
-    query: Pick<
-      SearchQuery,
-      "location" | "radiusKm" | "latitude" | "longitude"
-    >,
-  ): Promise<Theatre[]> {
-    return (await this.resolveSearchArea(query)).theatres;
-  }
-
   async suggestMovieTitles(
     query: MovieSuggestionQuery,
   ): Promise<MovieSuggestion[]> {
@@ -219,7 +202,7 @@ export class CineplexClient {
 
     const limit = query.limit ?? 8;
     const searchDates = getValidatedSearchDates(query);
-    const theatres = await this.findTheatres(query);
+    const theatres = (await this.resolveSearchArea(query)).theatres;
     const showtimeGroups = await Promise.all(
       theatres.slice(0, MAX_SUGGESTION_THEATRES).map(async (theatre) => ({
         theatre,
@@ -290,16 +273,13 @@ export class CineplexClient {
     const textMatches = theatres.filter((theatre) =>
       matchesTheatreText(theatre, text),
     );
-    const inferredCoordinates =
-      coordinates ?? inferCoordinatesFromMatches(textMatches, text);
-
-    if (inferredCoordinates) {
+    if (coordinates) {
       const matchedTheatres = theatres
         .map((theatre) => ({
           theatre,
           distance:
             theatre.latitude !== undefined && theatre.longitude !== undefined
-              ? distanceKm(inferredCoordinates, {
+              ? distanceKm(coordinates, {
                   latitude: theatre.latitude,
                   longitude: theatre.longitude,
                 })
@@ -309,7 +289,7 @@ export class CineplexClient {
         .sort((a, b) => a.distance - b.distance)
         .map((item) => item.theatre);
 
-      return { origin: inferredCoordinates, theatres: matchedTheatres };
+      return { origin: coordinates, theatres: matchedTheatres };
     }
 
     if (provinceCode) {
@@ -329,7 +309,7 @@ export class CineplexClient {
       locationId: theatre.cineplexId,
       date,
     })}`;
-    const response = await this.getJson<CineplexShowtimeResponse>(url, []);
+    const response = await this.getJson<CineplexShowtimeResponse>(url);
     const showtimes: Showtime[] = [];
 
     for (const theatreShowtimes of response) {
@@ -389,10 +369,10 @@ export class CineplexClient {
       ),
     ]);
 
-    return buildSeatSnapshot(showtime.id, toRawSeats(layout, availability));
+    return buildSeatSnapshot(toRawSeats(layout, availability));
   }
 
-  private async getJson<T>(url: string, emptyFallback?: T): Promise<T> {
+  private async getJson<T>(url: string): Promise<T> {
     const response = await fetch(url, {
       headers: this.headers,
       cache: "no-store",
@@ -406,10 +386,6 @@ export class CineplexClient {
     }
 
     const text = await response.text();
-
-    if (!text.trim() && emptyFallback !== undefined) {
-      return emptyFallback;
-    }
 
     try {
       return JSON.parse(text) as T;
@@ -490,12 +466,16 @@ function sortResults(
     const direction = sortBy.endsWith("desc") ? -1 : 1;
     const primary = sortBy.startsWith("distance")
       ? compareOptionalNumber(a.distanceKm, b.distanceKm, direction)
-      : compareShowtime(a, b, direction);
+      : compareTimeValues(
+          a.showtime.startsAt,
+          b.showtime.startsAt,
+          direction,
+        );
     const secondary = sortBy.startsWith("distance")
-      ? compareShowtime(a, b, 1)
+      ? compareTimeValues(a.showtime.startsAt, b.showtime.startsAt, 1)
       : compareOptionalNumber(a.distanceKm, b.distanceKm, 1);
 
-    return primary || secondary || compareLowOccupancy(a, b);
+    return primary || secondary;
   });
 }
 
@@ -545,14 +525,6 @@ function dedupeShowtimes(showtimes: Showtime[]): Showtime[] {
   );
 }
 
-function compareShowtime(
-  a: SearchResult,
-  b: SearchResult,
-  direction: number,
-): number {
-  return compareTimeValues(a.showtime.startsAt, b.showtime.startsAt, direction);
-}
-
 function compareTimeValues(a: string, b: string, direction: number): number {
   return (new Date(a).getTime() - new Date(b).getTime()) * direction;
 }
@@ -575,14 +547,6 @@ function compareOptionalNumber(
   }
 
   return (a - b) * direction;
-}
-
-function compareLowOccupancy(a: SearchResult, b: SearchResult): number {
-  return (
-    CONFIDENCE_RANK[a.snapshot.confidence] -
-      CONFIDENCE_RANK[b.snapshot.confidence] ||
-    a.snapshot.occupiedEstimate - b.snapshot.occupiedEstimate
-  );
 }
 
 function getDistanceFromOrigin(
@@ -729,61 +693,14 @@ function matchesTheatreText(theatre: Theatre, text: string): boolean {
   );
 }
 
-function inferCoordinatesFromMatches(
-  matches: Theatre[],
-  text: string,
-): Coordinates | undefined {
-  const coordinateMatches = matches.filter(
-    (theatre): theatre is Theatre & { latitude: number; longitude: number } =>
-      theatre.latitude !== undefined && theatre.longitude !== undefined,
-  );
-
-  const normalizedText = text.replace(/\s+/g, "");
-  const strongMatches =
-    coordinateMatches.length <= 3
-      ? coordinateMatches
-      : coordinateMatches.filter((theatre) => {
-          const city = theatre.city.toLowerCase();
-          const postalCode = theatre.postalCode
-            ?.toLowerCase()
-            .replace(/\s+/g, "");
-
-          return (
-            city === text || Boolean(postalCode?.startsWith(normalizedText))
-          );
-        });
-
-  if (!strongMatches.length) {
-    return undefined;
-  }
-
-  return {
-    latitude:
-      strongMatches.reduce((sum, theatre) => sum + theatre.latitude, 0) /
-      strongMatches.length,
-    longitude:
-      strongMatches.reduce((sum, theatre) => sum + theatre.longitude, 0) /
-      strongMatches.length,
-  };
-}
-
 function toRawSeats(
   layout: SeatLayout,
   availability: SeatAvailability,
 ): RawSeat[] {
   const availabilityBySeat = availability.seatAvailabilities ?? {};
-  const seats = flattenSeats(layout);
-
-  if (availability.isPostShowtime) {
-    return seats.map((seat) => ({
-      type: seat.type,
-      status: "unknown",
-    }));
-  }
-
-  return seats.map((seat) => ({
+  return flattenSeats(layout).map((seat) => ({
     type: seat.type,
-    status: availabilityBySeat[seat.id] ?? "Available",
+    status: availabilityBySeat[seat.id],
   }));
 }
 

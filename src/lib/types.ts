@@ -1,16 +1,5 @@
 import type { ShowtimeExperienceType } from "./experience-types";
 
-export type SeatStatus =
-  | "available"
-  | "sold"
-  | "reserved"
-  | "blocked"
-  | "wheelchair"
-  | "companion"
-  | "unknown";
-
-export type Confidence =
-  "high" | "medium" | "low-but-interesting" | "not-empty" | "unknown";
 export type SortOption =
   "distance-asc" | "distance-desc" | "time-asc" | "time-desc";
 
@@ -39,16 +28,10 @@ export type Showtime = {
 };
 
 export type SeatSnapshot = {
-  showtimeId: string;
   checkedAt: string;
-  totalSeats: number;
   sellableSeats: number;
-  availableCount: number;
   occupiedEstimate: number;
-  blockedCount: number;
   accessibilityCount: number;
-  unknownCount: number;
-  confidence: Confidence;
 };
 
 export type SearchResult = {
