@@ -78,7 +78,8 @@ function toCliResult(result: SearchResult) {
     accessibility_count: result.snapshot.accessibilityCount,
     unknown_count: result.snapshot.unknownCount,
     confidence: result.snapshot.confidence,
-    ticket_url: result.showtime.ticketUrl,
+    purchase_url: result.showtime.purchaseUrl,
+    seat_preview_url: result.showtime.seatPreviewUrl,
   };
 }
 

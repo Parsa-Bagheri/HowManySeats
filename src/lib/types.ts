@@ -36,7 +36,8 @@ export type Showtime = {
   startsAt: string;
   format?: string;
   auditorium?: string;
-  ticketUrl: string;
+  purchaseUrl?: string;
+  seatPreviewUrl: string;
   accessibleServices?: string[];
 };
 

@@ -11,6 +11,7 @@ The app estimates occupied and open seats at nearby Cineplex showtimes.
 - A Node.js API route written in TypeScript
 - A command-line interface (CLI) collector that uses live Cineplex showtime and
   preview seat-occupancy data
+- Separate Cineplex links for buying tickets and previewing seats
 - Seat classification and confidence scoring
 - Discovery, schema, and compliance notes
 
@@ -68,7 +69,8 @@ The command returns output like this:
     "accessibility_count": 4,
     "unknown_count": 0,
     "confidence": "high",
-    "ticket_url": "https://www.cineplex.com/en-Mobile/ticketing/preview"
+    "purchase_url": "https://apis.cineplex.com/prod/cpx/theatrical/deeplink?s=123&a=1&l=7402&m=example-movie",
+    "seat_preview_url": "https://www.cineplex.com/en-Mobile/ticketing/preview?theatreId=7402&showtimeId=123&dbox=False"
   }
 ]
 ```

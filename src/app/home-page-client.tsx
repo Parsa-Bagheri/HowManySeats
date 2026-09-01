@@ -1555,6 +1555,7 @@ function CleanFilterToggle({
 function CleanResultCard({ result }: { result: SearchResult }) {
   const startsAt = new Date(result.showtime.startsAt);
   const checkedAt = new Date(result.snapshot.checkedAt);
+  const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString()}`;
 
   return (
     <article className="rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_14px_44px_rgba(0,0,0,0.28)]">
@@ -1571,16 +1572,34 @@ function CleanResultCard({ result }: { result: SearchResult }) {
               : ""}
           </p>
         </div>
-        <a
-          className="focus-ring inline-flex items-center gap-2 rounded-md border border-neutral-700 px-3 py-2 text-sm font-semibold text-neutral-100 transition hover:border-amber-300 hover:text-amber-200"
-          href={result.showtime.ticketUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          View this showtime on Cineplex
-          <span className="sr-only"> (opens in a new tab)</span>
-          <ExternalLink className="h-4 w-4" aria-hidden="true" />
-        </a>
+        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+          {result.showtime.purchaseUrl ? (
+            <a
+              className="focus-ring inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-amber-300 px-3 py-2 text-sm font-semibold text-black transition hover:bg-amber-200"
+              href={result.showtime.purchaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Buy tickets for ${showtimeLinkContext} on Cineplex (opens in a new tab)`}
+            >
+              Buy tickets
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+          ) : (
+            <span className="inline-flex min-h-11 items-center justify-center rounded-md border border-neutral-800 px-3 py-2 text-sm text-neutral-400">
+              Purchase unavailable
+            </span>
+          )}
+          <a
+            className="focus-ring inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-neutral-700 px-3 py-2 text-sm font-semibold text-neutral-100 transition hover:border-amber-300 hover:text-amber-200"
+            href={result.showtime.seatPreviewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Preview seats for ${showtimeLinkContext} (opens in a new tab)`}
+          >
+            Preview seats
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+          </a>
+        </div>
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
@@ -1727,6 +1746,7 @@ function FunFilterToggle({
 function FunResultCard({ result }: { result: SearchResult }) {
   const startsAt = new Date(result.showtime.startsAt);
   const checkedAt = new Date(result.snapshot.checkedAt);
+  const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString()}`;
   const openSeats = Math.max(
     0,
     result.snapshot.sellableSeats - result.snapshot.occupiedEstimate,
@@ -1758,16 +1778,34 @@ function FunResultCard({ result }: { result: SearchResult }) {
             ) : null}
           </p>
         </div>
-        <a
-          className="focus-ring inline-flex min-h-12 rotate-1 items-center justify-center gap-2 border-4 border-black bg-white px-4 text-sm font-black uppercase shadow-[5px_5px_0_#111111] transition hover:-translate-x-1 hover:-translate-y-1 hover:bg-[#00d5ff] hover:shadow-[8px_8px_0_#111111]"
-          href={result.showtime.ticketUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          View this showtime on Cineplex
-          <span className="sr-only"> (opens in a new tab)</span>
-          <ExternalLink className="h-4 w-4" aria-hidden="true" />
-        </a>
+        <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-2">
+          {result.showtime.purchaseUrl ? (
+            <a
+              className="focus-ring inline-flex min-h-12 -rotate-1 items-center justify-center gap-2 border-4 border-black bg-[#ff4fa3] px-4 text-sm font-black uppercase shadow-[5px_5px_0_#111111] transition hover:-translate-x-1 hover:-translate-y-1 hover:bg-[#00e676] hover:shadow-[8px_8px_0_#111111]"
+              href={result.showtime.purchaseUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Buy tickets for ${showtimeLinkContext} on Cineplex (opens in a new tab)`}
+            >
+              Buy tickets
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </a>
+          ) : (
+            <span className="inline-flex min-h-12 items-center justify-center border-4 border-black bg-zinc-300 px-4 text-sm font-black uppercase text-zinc-600">
+              Purchase unavailable
+            </span>
+          )}
+          <a
+            className="focus-ring inline-flex min-h-12 rotate-1 items-center justify-center gap-2 border-4 border-black bg-white px-4 text-sm font-black uppercase shadow-[5px_5px_0_#111111] transition hover:-translate-x-1 hover:-translate-y-1 hover:bg-[#00d5ff] hover:shadow-[8px_8px_0_#111111]"
+            href={result.showtime.seatPreviewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Preview seats for ${showtimeLinkContext} (opens in a new tab)`}
+          >
+            Preview seats
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+          </a>
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">

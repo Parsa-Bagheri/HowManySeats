@@ -37,8 +37,9 @@ GET https://apis.cineplex.com/prod/cpx/theatrical/api/v1/showtimes?language=en&l
 ```
 
 The response contains the theatre, movie, format, session,
-`vistaSessionId`, `ticketingUrl`, `seatMapUrl`, and the `isSoldOut`,
-`isInThePast`, and `isReservedSeating` fields.
+`vistaSessionId`, `deeplinkUrl`, `seatMapUrl`, and the `isSoldOut`,
+`isInThePast`, and `isReservedSeating` fields. The app uses `deeplinkUrl` only
+as a link that opens Cineplex's public purchase flow in a new tab.
 
 ### Seat maps without signing in
 

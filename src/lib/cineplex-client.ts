@@ -72,8 +72,9 @@ type CineplexMovieShowtime = {
 type CineplexSession = {
   vistaSessionId: number;
   showStartDateTime: string;
+  deeplinkUrl?: string;
   seatMapUrl?: string;
-  ticketingUrl?: string;
+  isShowtimeEnabledOnline?: boolean;
   isSoldOut?: boolean;
   isInThePast?: boolean;
   isReservedSeating?: boolean;
@@ -368,7 +369,11 @@ export class CineplexClient {
                 startsAt: session.showStartDateTime,
                 format,
                 auditorium: session.auditorium,
-                ticketUrl: buildPublicSeatMapUrl(
+                purchaseUrl:
+                  session.isShowtimeEnabledOnline === false
+                    ? undefined
+                    : normalizePublicPurchaseUrl(session.deeplinkUrl),
+                seatPreviewUrl: buildPublicSeatMapUrl(
                   theatre.cineplexId,
                   session,
                   dbox,
@@ -676,6 +681,27 @@ function buildPublicSeatMapUrl(
   return url.toString();
 }
 
+export function normalizePublicPurchaseUrl(
+  rawUrl?: string,
+): string | undefined {
+  if (!rawUrl) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(rawUrl);
+    const isCineplexDeeplink =
+      url.protocol === "https:" &&
+      url.hostname.toLowerCase() === "apis.cineplex.com" &&
+      url.pathname.toLowerCase() === "/prod/cpx/theatrical/deeplink" &&
+      ["s", "a", "l", "m"].every((key) => Boolean(url.searchParams.get(key)));
+
+    return isCineplexDeeplink ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function normalizePublicSeatMapUrl(rawUrl?: string): string | undefined {
   if (!rawUrl) {
     return undefined;
@@ -685,6 +711,7 @@ function normalizePublicSeatMapUrl(rawUrl?: string): string | undefined {
     const url = new URL(rawUrl);
     const hostname = url.hostname.toLowerCase();
     const isCineplexPreview =
+      url.protocol === "https:" &&
       (hostname === "www.cineplex.com" || hostname === "cineplex.com") &&
       url.pathname.toLowerCase().endsWith("/ticketing/preview") &&
       Boolean(url.searchParams.get("theatreId")) &&
