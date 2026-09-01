@@ -678,8 +678,8 @@ function CleanHomeView({
         </div>
       </div>
       <footer className="mx-auto mt-5 grid w-full max-w-7xl gap-1 border-t border-neutral-900 pt-4 text-center text-xs text-neutral-500">
-        <p>Built in Waterloo.</p>
-        <p>Cineplex doesn't sponsor or operate this site.</p>
+        <p>Made in Waterloo, with love</p>
+        <p>This site is not affiliated with Cineplex.</p>
       </footer>
     </main>
   );
@@ -793,7 +793,7 @@ function FunHomeView({
             className={`border-[6px] border-black bg-[#00d5ff] p-4 ${funPanelShadow} sm:rotate-[-0.35deg] xl:sticky xl:top-5 xl:self-start`}
           >
             <div className="panic-heading mb-5 border-[6px] border-black p-3 shadow-[7px_7px_0_#111111]">
-              <h2 className="break-words text-[clamp(1.85rem,5.2vw,3.2rem)] font-black uppercase leading-none">
+              <h2 className="text-[clamp(1.85rem,5.2vw,3.2rem)] font-black uppercase leading-none">
                 See available seats at nearby showtimes
               </h2>
             </div>
@@ -962,10 +962,10 @@ function FunHomeView({
         </div>
         <footer className="grid gap-2 border-[6px] border-black bg-[#00e676] px-4 py-4 text-center text-sm font-black uppercase tracking-[0.16em] shadow-[10px_10px_0_#111111] sm:-rotate-[0.35deg]">
           <span className="inline-block justify-self-center -rotate-1 bg-white px-3 py-1 shadow-[5px_5px_0_#111111]">
-            Built in Waterloo.
+            Made in Waterloo, with love
           </span>
           <span className="inline-block justify-self-center rotate-1 bg-white px-3 py-1 text-[0.7rem] shadow-[5px_5px_0_#111111]">
-            Cineplex doesn't sponsor or operate this site.
+            This site is not affiliated with Cineplex.
           </span>
         </footer>
       </div>
@@ -1467,8 +1467,8 @@ function TheatreTypeField({
         <summary className={summaryClass}>
           <span>
             {selectedTypes.length
-              ? `${selectedTypes.length} theatre ${selectedTypes.length === 1 ? "type" : "types"} selected`
-              : "No theatre-type filter"}
+              ? `${selectedTypes.length} selected`
+              : "No filter"}
           </span>
           <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
         </summary>
@@ -1483,7 +1483,7 @@ function TheatreTypeField({
               type="button"
               onClick={() => setSelectedTypes([])}
             >
-              Clear all theatre types
+              Clear all
             </button>
           ) : null}
           {SHOWTIME_EXPERIENCE_TYPES.map((experienceType) => (
@@ -1587,7 +1587,7 @@ function CleanResultCard({ result }: { result: SearchResult }) {
             <MapPin className="h-4 w-4 text-amber-300" aria-hidden="true" />
             {result.theatre.city}, {result.theatre.province}
             {result.distanceKm !== undefined
-              ? `, ${result.distanceKm.toFixed(1)} km away`
+              ? ` - ${result.distanceKm.toFixed(1)} km`
               : ""}
           </p>
         </div>
@@ -1634,29 +1634,23 @@ function CleanResultCard({ result }: { result: SearchResult }) {
             {startsAt.toLocaleTimeString([], {
               hour: "numeric",
               minute: "2-digit",
-            })}
-            : {result.showtime.movieTitle}
+            })}{" "}
+            - {result.showtime.movieTitle}
           </p>
           <p className="mt-1 text-sm text-neutral-400">
             {[result.showtime.format, result.showtime.auditorium]
               .filter(Boolean)
-              .join(", ")}
+              .join(" - ")}
           </p>
         </div>
 
         <div className="grid min-w-56 gap-1 rounded-md border border-neutral-800 bg-black/35 p-3 text-sm">
           <p className="font-semibold text-white">
-            {result.snapshot.occupiedEstimate} occupied out of{" "}
+            {result.snapshot.occupiedEstimate} occupied /{" "}
             {result.snapshot.sellableSeats} seats
           </p>
           <p className="text-neutral-400">
-            Last checked {formatCheckedTime(checkedAt)}
-          </p>
-          <p className="text-neutral-400">
-            Seats excluded from the occupancy count:{" "}
-            {result.snapshot.accessibilityCount +
-              result.snapshot.blockedCount +
-              result.snapshot.unknownCount}
+            Last checked {relativeMinutes(checkedAt)} min ago
           </p>
         </div>
       </div>
@@ -1850,7 +1844,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
             <p className="mt-2 text-sm font-black uppercase text-zinc-700">
               {[result.showtime.format, result.showtime.auditorium]
                 .filter(Boolean)
-                .join(", ")}
+                .join(" / ")}
             </p>
           </div>
 
@@ -1863,7 +1857,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
             />
             <MetricSlab
               label="Occupied"
-              value={`${result.snapshot.occupiedEstimate} of ${result.snapshot.sellableSeats}`}
+              value={`${result.snapshot.occupiedEstimate}/${result.snapshot.sellableSeats}`}
               tone="bg-[#ff4fa3]"
               tilt="rotate-1"
             />
@@ -1878,13 +1872,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
 
         <aside className="grid border-t-[6px] border-black bg-black text-white lg:border-l-[6px] lg:border-t-0">
           <div className="grid gap-2 p-4 text-sm font-bold uppercase text-zinc-100">
-            <p>Last checked {formatCheckedTime(checkedAt)}</p>
-            <p>
-              Seats excluded from the occupancy count:{" "}
-              {result.snapshot.accessibilityCount +
-                result.snapshot.blockedCount +
-                result.snapshot.unknownCount}
-            </p>
+            <p>Last checked {relativeMinutes(checkedAt)} min ago</p>
           </div>
         </aside>
       </div>
@@ -1946,16 +1934,10 @@ function resultCount(results: SearchResult[], loading: boolean): string {
   return String(results.length);
 }
 
-function formatCheckedTime(date: Date): string {
+function relativeMinutes(date: Date): number {
   const now = new Date();
-  const minutes = Math.max(
+  return Math.max(
     0,
     Math.round((now.getTime() - date.getTime()) / 60000),
   );
-
-  if (minutes === 0) {
-    return "less than a minute ago";
-  }
-
-  return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
 }
