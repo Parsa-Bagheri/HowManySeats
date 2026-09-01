@@ -157,10 +157,14 @@ export class CineplexClient {
       sortShowtimeCandidates(candidates, sortBy),
     );
 
-    const candidates = interleaveCandidates(sortedCandidateGroups).slice(
-      0,
-      maxSeatChecks,
-    );
+    const candidates = Array.from(
+      new Map(
+        interleaveCandidates(sortedCandidateGroups).map((candidate) => [
+          candidate.showtime.id,
+          candidate,
+        ]),
+      ).values(),
+    ).slice(0, maxSeatChecks);
 
     for (
       let offset = 0;
@@ -309,7 +313,7 @@ export class CineplexClient {
       locationId: theatre.cineplexId,
       date,
     })}`;
-    const response = await this.getJson<CineplexShowtimeResponse>(url);
+    const response = await this.getJson<CineplexShowtimeResponse>(url, []);
     const showtimes: Showtime[] = [];
 
     for (const theatreShowtimes of response) {
@@ -372,7 +376,7 @@ export class CineplexClient {
     return buildSeatSnapshot(toRawSeats(layout, availability));
   }
 
-  private async getJson<T>(url: string): Promise<T> {
+  private async getJson<T>(url: string, emptyFallback?: T): Promise<T> {
     const response = await fetch(url, {
       headers: this.headers,
       cache: "no-store",
@@ -386,6 +390,10 @@ export class CineplexClient {
     }
 
     const text = await response.text();
+
+    if (!text.trim() && emptyFallback !== undefined) {
+      return emptyFallback;
+    }
 
     try {
       return JSON.parse(text) as T;

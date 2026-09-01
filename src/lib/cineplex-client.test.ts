@@ -99,6 +99,29 @@ test("maps purchase and preview links from Cineplex showtimes", async (t) => {
   );
 });
 
+test("treats an empty showtime response as no showtimes", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () => new Response("");
+
+  const client = new CineplexClient("test-key");
+  const showtimes = await client.getShowtimes(
+    {
+      id: "7402",
+      cineplexId: "7402",
+      name: "Example Theatre",
+      city: "Example City",
+      province: "ON",
+    },
+    "2026-09-01",
+  );
+
+  assert.deepEqual(showtimes, []);
+});
+
 test("checks seat maps in bounded parallel batches", async (t) => {
   const originalFetch = globalThis.fetch;
   let activeSeatRequests = 0;
@@ -174,6 +197,7 @@ test("checks seat maps in bounded parallel batches", async (t) => {
   const results = await client.search({
     location: "Toronto",
     date: "2026-09-01",
+    endDate: "2026-09-02",
     radiusKm: 25,
     latitude: 43.65,
     longitude: -79.38,

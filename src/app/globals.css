@@ -202,6 +202,7 @@ a {
   position: relative;
   display: inline-flex;
   padding: 1rem 1.05rem 0.95rem;
+  contain: layout paint;
   isolation: isolate;
 }
 
@@ -229,8 +230,7 @@ a {
   pointer-events: none;
   content: "";
   background: url("https://media.tenor.com/yrvwkbrsHpEAAAAS/fire-lit.gif") center / 3.8rem 3.8rem repeat;
-  filter: drop-shadow(0 0 0.34rem rgba(255, 90, 0, 0.95));
-  mix-blend-mode: multiply;
+  opacity: 0.72;
 }
 
 .fun-throbber-panel {
@@ -485,8 +485,11 @@ a {
 
 @media (prefers-reduced-motion: reduce) {
   .marquee-track,
-  .search-spinner,
   .fun-throbber-panel::before {
     animation: none;
+  }
+
+  .fun-switch-flames::after {
+    background-image: none;
   }
 }

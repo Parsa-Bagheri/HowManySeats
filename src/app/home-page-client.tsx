@@ -21,6 +21,7 @@ import {
   type ReactNode,
   type SetStateAction,
   memo,
+  startTransition,
   useCallback,
   useEffect,
   useRef,
@@ -126,6 +127,7 @@ const SORT_LABELS = {
 
 const THEME_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+const FUN_RESULT_BATCH_SIZE = 12;
 
 const funInputClass =
   "focus-ring h-12 w-full border-4 border-black bg-[#fff8df] px-3 text-base font-black text-black shadow-[6px_6px_0_#111111] transition placeholder:text-zinc-500 focus:-translate-y-0.5 focus:shadow-[8px_8px_0_#111111]";
@@ -173,8 +175,8 @@ export default function HomePageClient({
       .length + experienceTypes.length;
 
   const setUiMode = useCallback((mode: UiMode) => {
-    setUiModeState(mode);
     rememberUiModePreference(mode);
+    startTransition(() => setUiModeState(mode));
   }, []);
 
   const dismissThemePrompt = useCallback(() => {
@@ -249,6 +251,7 @@ export default function HomePageClient({
   const executeSearch = useCallback(async (state: SearchState) => {
     setLoading(true);
     setError(undefined);
+    setResults([]);
 
     const params = buildSearchParams(state);
     window.history.replaceState(null, "", `/?${params.toString()}`);
@@ -744,7 +747,10 @@ function FunHomeView(props: SearchViewProps) {
               </div>
             ) : null}
 
-            <FunResultList results={results} />
+            <FunResultList
+              key={results[0]?.snapshot.checkedAt ?? "no-results"}
+              results={results}
+            />
           </section>
         </div>
         <footer className="grid gap-2 border-[6px] border-black bg-[#00e676] px-4 py-4 text-center text-sm font-black uppercase tracking-[0.16em] shadow-[10px_10px_0_#111111] sm:-rotate-[0.35deg]">
@@ -1788,12 +1794,31 @@ const FunResultList = memo(function FunResultList({
 }: {
   results: SearchResult[];
 }) {
+  const [visibleCount, setVisibleCount] = useState(FUN_RESULT_BATCH_SIZE);
+  const visibleResults = results.slice(0, visibleCount);
+  const remainingCount = results.length - visibleResults.length;
+
   return (
-    <div className="grid gap-5">
-      {results.map((result) => (
-        <FunResultCard key={result.showtime.id} result={result} />
-      ))}
-    </div>
+    <>
+      <div className="grid gap-5">
+        {visibleResults.map((result) => (
+          <FunResultCard key={result.showtime.id} result={result} />
+        ))}
+      </div>
+      {remainingCount > 0 ? (
+        <button
+          className="focus-ring mx-auto inline-flex min-h-14 items-center justify-center border-[6px] border-black bg-[#f7e900] px-6 text-base font-black uppercase text-black shadow-[8px_8px_0_#111111] transition hover:bg-[#00e676]"
+          type="button"
+          onClick={() =>
+            startTransition(() =>
+              setVisibleCount((count) => count + FUN_RESULT_BATCH_SIZE),
+            )
+          }
+        >
+          Show {Math.min(FUN_RESULT_BATCH_SIZE, remainingCount)} more results
+        </button>
+      ) : null}
+    </>
   );
 });
 
