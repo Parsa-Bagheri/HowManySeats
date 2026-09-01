@@ -1,4 +1,4 @@
-export const MAX_SEARCH_DAYS = 3;
+const MAX_SEARCH_DAYS = 3;
 
 const DATE_INPUT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -7,7 +7,10 @@ export function isValidDateInput(value: string): boolean {
   return Boolean(date && formatDateInput(date) === value);
 }
 
-export function getSearchDates(startDate: string, endDate = startDate): string[] | undefined {
+export function getSearchDates(
+  startDate: string,
+  endDate = startDate,
+): string[] | undefined {
   const start = parseDateInput(startDate);
   const end = parseDateInput(endDate);
 
@@ -15,13 +18,16 @@ export function getSearchDates(startDate: string, endDate = startDate): string[]
     return undefined;
   }
 
-  const dayCount = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
+  const dayCount =
+    Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
 
   if (dayCount > MAX_SEARCH_DAYS) {
     return undefined;
   }
 
-  return Array.from({ length: dayCount }, (_, index) => addDays(startDate, index));
+  return Array.from({ length: dayCount }, (_, index) =>
+    addDays(startDate, index),
+  );
 }
 
 export function normalizeEndDate(startDate: string, endDate?: string): string {
@@ -48,7 +54,10 @@ export function addDays(value: string, days: number): string {
   return formatDateInput(date);
 }
 
-export function formatDateRangeLabel(startDate: string, endDate: string): string {
+export function formatDateRangeLabel(
+  startDate: string,
+  endDate: string,
+): string {
   return startDate === endDate ? startDate : `${startDate} to ${endDate}`;
 }
 

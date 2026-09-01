@@ -1,4 +1,9 @@
-import { distanceKm, getProvinceCode, resolveLocation, type Coordinates } from "./geo";
+import {
+  distanceKm,
+  getProvinceCode,
+  resolveLocation,
+  type Coordinates,
+} from "./geo";
 import { getSearchDates } from "./date-range";
 import { showtimeMatchesExperienceTypes } from "./experience-types";
 import { buildSeatSnapshot } from "./seat-scoring";
@@ -10,7 +15,7 @@ import type {
   SeatSnapshot,
   Showtime,
   SortOption,
-  Theatre
+  Theatre,
 } from "./types";
 
 const THEATRICAL_API_BASE = "https://apis.cineplex.com/prod/cpx/theatrical/api";
@@ -21,7 +26,7 @@ const CONFIDENCE_RANK: Record<SeatSnapshot["confidence"], number> = {
   medium: 1,
   "low-but-interesting": 2,
   "not-empty": 3,
-  unknown: 4
+  unknown: 4,
 };
 
 type CineplexTheatresResponse = {
@@ -115,24 +120,39 @@ type MovieSuggestionQuery = Pick<
 export class CineplexClient {
   private readonly headers: HeadersInit;
 
-  constructor(subscriptionKey = process.env.CINEPLEX_APIM_SUBSCRIPTION_KEY || PUBLIC_SITE_KEY) {
+  constructor(
+    subscriptionKey = process.env.CINEPLEX_APIM_SUBSCRIPTION_KEY ||
+      PUBLIC_SITE_KEY,
+  ) {
     this.headers = {
       Accept: "application/json",
-      "Ocp-Apim-Subscription-Key": subscriptionKey
+      "Ocp-Apim-Subscription-Key": subscriptionKey,
     };
   }
 
   async search(query: SearchQuery): Promise<SearchResult[]> {
     const { origin, theatres } = await this.resolveSearchArea(query);
-    const searchDates = getSearchDates(query.date, query.endDate ?? query.date) ?? [query.date];
-    const maxTheatres = Number(process.env.CINEPLEX_MAX_THEATRES_PER_SEARCH ?? 5);
-    const maxSeatChecks = Number(process.env.CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH ?? 40);
-    const candidatesByDate = new Map(searchDates.map((date) => [date, [] as ShowtimeCandidate[]]));
+    const searchDates = getSearchDates(
+      query.date,
+      query.endDate ?? query.date,
+    ) ?? [query.date];
+    const maxTheatres = Number(
+      process.env.CINEPLEX_MAX_THEATRES_PER_SEARCH ?? 5,
+    );
+    const maxSeatChecks = Number(
+      process.env.CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH ?? 40,
+    );
+    const candidatesByDate = new Map(
+      searchDates.map((date) => [date, [] as ShowtimeCandidate[]]),
+    );
     const results: SearchResult[] = [];
 
     for (const theatre of theatres.slice(0, maxTheatres)) {
       const showtimesByDate = await Promise.all(
-        searchDates.map(async (date) => ({ date, showtimes: await this.getShowtimes(theatre, date) }))
+        searchDates.map(async (date) => ({
+          date,
+          showtimes: await this.getShowtimes(theatre, date),
+        })),
       );
 
       for (const { date, showtimes } of showtimesByDate) {
@@ -142,23 +162,32 @@ export class CineplexClient {
           candidatesByDate.get(date)?.push({
             theatre,
             showtime,
-            distanceKm: getDistanceFromOrigin(origin, theatre)
+            distanceKm: getDistanceFromOrigin(origin, theatre),
           });
         }
       }
     }
 
     const candidateGroups = searchDates.map((date) =>
-      sortShowtimeCandidates(candidatesByDate.get(date) ?? [], query.sortBy ?? "distance-asc")
+      sortShowtimeCandidates(
+        candidatesByDate.get(date) ?? [],
+        query.sortBy ?? "distance-asc",
+      ),
     );
 
-    for (const candidate of interleaveCandidates(candidateGroups).slice(0, maxSeatChecks)) {
-      const snapshot = await this.getSeatSnapshot(candidate.theatre, candidate.showtime);
+    for (const candidate of interleaveCandidates(candidateGroups).slice(
+      0,
+      maxSeatChecks,
+    )) {
+      const snapshot = await this.getSeatSnapshot(
+        candidate.theatre,
+        candidate.showtime,
+      );
       const result = {
         theatre: candidate.theatre,
         showtime: candidate.showtime,
         snapshot,
-        distanceKm: candidate.distanceKm
+        distanceKm: candidate.distanceKm,
       };
 
       if (this.matchesSnapshotFilters(result, query)) {
@@ -170,31 +199,48 @@ export class CineplexClient {
   }
 
   async findTheatres(
-    query: Pick<SearchQuery, "location" | "radiusKm" | "latitude" | "longitude">
+    query: Pick<
+      SearchQuery,
+      "location" | "radiusKm" | "latitude" | "longitude"
+    >,
   ): Promise<Theatre[]> {
     return (await this.resolveSearchArea(query)).theatres;
   }
 
-  async suggestMovieTitles(query: MovieSuggestionQuery): Promise<MovieSuggestion[]> {
+  async suggestMovieTitles(
+    query: MovieSuggestionQuery,
+  ): Promise<MovieSuggestion[]> {
     const terms = normalizeSuggestionTerms(query.movieTitle);
 
     if (!terms.length) {
       return [];
     }
 
-    const maxTheatres = Number(process.env.CINEPLEX_MAX_THEATRES_PER_SUGGESTIONS ?? 8);
+    const maxTheatres = Number(
+      process.env.CINEPLEX_MAX_THEATRES_PER_SUGGESTIONS ?? 8,
+    );
     const limit = query.limit ?? 8;
-    const searchDates = getSearchDates(query.date, query.endDate ?? query.date) ?? [query.date];
+    const searchDates = getSearchDates(
+      query.date,
+      query.endDate ?? query.date,
+    ) ?? [query.date];
     const theatres = await this.findTheatres(query);
     const showtimeGroups = await Promise.all(
       theatres.slice(0, maxTheatres).map(async (theatre) => ({
         theatre,
         showtimes: dedupeShowtimes(
-          (await Promise.all(searchDates.map((date) => this.getShowtimes(theatre, date)))).flat()
-        )
-      }))
+          (
+            await Promise.all(
+              searchDates.map((date) => this.getShowtimes(theatre, date)),
+            )
+          ).flat(),
+        ),
+      })),
     );
-    const suggestionsByTitle = new Map<string, { title: string; theatreIds: Set<string>; showtimeCount: number }>();
+    const suggestionsByTitle = new Map<
+      string,
+      { title: string; theatreIds: Set<string>; showtimeCount: number }
+    >();
 
     for (const { theatre, showtimes } of showtimeGroups) {
       for (const showtime of showtimes) {
@@ -206,7 +252,7 @@ export class CineplexClient {
         const suggestion = suggestionsByTitle.get(key) ?? {
           title: showtime.movieTitle,
           theatreIds: new Set<string>(),
-          showtimeCount: 0
+          showtimeCount: 0,
         };
 
         suggestion.theatreIds.add(theatre.id);
@@ -219,32 +265,40 @@ export class CineplexClient {
       .map((suggestion) => ({
         title: suggestion.title,
         theatreCount: suggestion.theatreIds.size,
-        showtimeCount: suggestion.showtimeCount
+        showtimeCount: suggestion.showtimeCount,
       }))
       .sort((a, b) => compareMovieSuggestions(a, b, query.movieTitle))
       .slice(0, limit);
   }
 
   private async resolveSearchArea(
-    query: Pick<SearchQuery, "location" | "radiusKm" | "latitude" | "longitude">
+    query: Pick<
+      SearchQuery,
+      "location" | "radiusKm" | "latitude" | "longitude"
+    >,
   ): Promise<{ origin?: Coordinates; theatres: Theatre[] }> {
     const response = await this.getJson<CineplexTheatresResponse>(
-      `${THEATRICAL_API_BASE}/v1/theatres?language=en`
+      `${THEATRICAL_API_BASE}/v1/theatres?language=en`,
     );
     const rawTheatres = [
       ...(response.favouriteTheatres ?? []),
       ...(response.nearbyTheatres ?? []),
-      ...(response.otherTheatres ?? [])
+      ...(response.otherTheatres ?? []),
     ];
-    const theatres = rawTheatres.map(toTheatre).filter((theatre) => Boolean(theatre.cineplexId));
+    const theatres = rawTheatres
+      .map(toTheatre)
+      .filter((theatre) => Boolean(theatre.cineplexId));
     const coordinates =
       query.latitude !== undefined && query.longitude !== undefined
         ? { latitude: query.latitude, longitude: query.longitude }
         : await resolveLocation(query.location);
     const text = query.location.trim().toLowerCase();
     const provinceCode = getProvinceCode(text);
-    const textMatches = theatres.filter((theatre) => matchesTheatreText(theatre, text));
-    const inferredCoordinates = coordinates ?? inferCoordinatesFromMatches(textMatches, text);
+    const textMatches = theatres.filter((theatre) =>
+      matchesTheatreText(theatre, text),
+    );
+    const inferredCoordinates =
+      coordinates ?? inferCoordinatesFromMatches(textMatches, text);
 
     if (inferredCoordinates) {
       const matchedTheatres = theatres
@@ -252,8 +306,11 @@ export class CineplexClient {
           theatre,
           distance:
             theatre.latitude !== undefined && theatre.longitude !== undefined
-              ? distanceKm(inferredCoordinates, { latitude: theatre.latitude, longitude: theatre.longitude })
-              : Number.POSITIVE_INFINITY
+              ? distanceKm(inferredCoordinates, {
+                  latitude: theatre.latitude,
+                  longitude: theatre.longitude,
+                })
+              : Number.POSITIVE_INFINITY,
         }))
         .filter((item) => item.distance <= query.radiusKm)
         .sort((a, b) => a.distance - b.distance)
@@ -264,7 +321,9 @@ export class CineplexClient {
 
     if (provinceCode) {
       return {
-        theatres: theatres.filter((theatre) => theatre.province.toUpperCase() === provinceCode)
+        theatres: theatres.filter(
+          (theatre) => theatre.province.toUpperCase() === provinceCode,
+        ),
       };
     }
 
@@ -279,7 +338,7 @@ export class CineplexClient {
     const url = `${THEATRICAL_API_BASE}/v1/showtimes?${new URLSearchParams({
       language: "en",
       locationId: theatre.cineplexId,
-      date
+      date,
     })}`;
     const response = await this.getJson<CineplexShowtimeResponse>(url, []);
     const showtimes: Showtime[] = [];
@@ -289,11 +348,17 @@ export class CineplexClient {
         for (const movie of showDate.movies ?? []) {
           for (const experience of movie.experiences ?? []) {
             for (const session of experience.sessions ?? []) {
-              if (session.isSoldOut || session.isInThePast || !session.isReservedSeating) {
+              if (
+                session.isSoldOut ||
+                session.isInThePast ||
+                !session.isReservedSeating
+              ) {
                 continue;
               }
 
-              const format = (experience.experienceTypes ?? ["Regular"]).join(", ");
+              const format = (experience.experienceTypes ?? ["Regular"]).join(
+                ", ",
+              );
               const dbox = /D-BOX/i.test(format);
               showtimes.push({
                 id: `${theatre.cineplexId}-${session.vistaSessionId}-${session.areaCode ?? "area"}`,
@@ -303,12 +368,16 @@ export class CineplexClient {
                 startsAt: session.showStartDateTime,
                 format,
                 auditorium: session.auditorium,
-                ticketUrl: buildPublicSeatMapUrl(theatre.cineplexId, session, dbox),
+                ticketUrl: buildPublicSeatMapUrl(
+                  theatre.cineplexId,
+                  session,
+                  dbox,
+                ),
                 accessibleServices: [
                   ...(experience.isCcEnabled ? ["Closed captioning"] : []),
                   ...(experience.isDsEnabled ? ["Described services"] : []),
-                  "Seat-map accessibility seats tracked separately"
-                ]
+                  "Seat-map accessibility seats tracked separately",
+                ],
               });
             }
           }
@@ -319,18 +388,21 @@ export class CineplexClient {
     return showtimes;
   }
 
-  async getSeatSnapshot(theatre: Theatre, showtime: Showtime): Promise<SeatSnapshot> {
+  async getSeatSnapshot(
+    theatre: Theatre,
+    showtime: Showtime,
+  ): Promise<SeatSnapshot> {
     if (!theatre.cineplexId || !showtime.cineplexShowtimeId) {
       return buildSeatSnapshot(showtime.id, []);
     }
 
     const [layout, availability] = await Promise.all([
       this.getJson<SeatLayout>(
-        `${TICKETING_API_BASE}/v1/theatre/${theatre.cineplexId}/showtime/${showtime.cineplexShowtimeId}/seat-layout`
+        `${TICKETING_API_BASE}/v1/theatre/${theatre.cineplexId}/showtime/${showtime.cineplexShowtimeId}/seat-layout`,
       ),
       this.getJson<SeatAvailability>(
-        `${TICKETING_API_BASE}/v1/theatre/${theatre.cineplexId}/showtime/${showtime.cineplexShowtimeId}/seat-availability?preview=true`
-      )
+        `${TICKETING_API_BASE}/v1/theatre/${theatre.cineplexId}/showtime/${showtime.cineplexShowtimeId}/seat-availability?preview=true`,
+      ),
     ]);
 
     return buildSeatSnapshot(showtime.id, toRawSeats(layout, availability));
@@ -339,12 +411,14 @@ export class CineplexClient {
   private async getJson<T>(url: string, emptyFallback?: T): Promise<T> {
     const response = await fetch(url, {
       headers: this.headers,
-      cache: "no-store"
+      cache: "no-store",
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`Cineplex GET failed ${response.status} for ${url}: ${body.slice(0, 300)}`);
+      throw new Error(
+        `Cineplex GET failed ${response.status} for ${url}: ${body.slice(0, 300)}`,
+      );
     }
 
     const text = await response.text();
@@ -356,17 +430,25 @@ export class CineplexClient {
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new Error(`Cineplex returned invalid JSON for ${url}: ${text.slice(0, 300)}`);
+      throw new Error(
+        `Cineplex returned invalid JSON for ${url}: ${text.slice(0, 300)}`,
+      );
     }
   }
 
-  private filterShowtimes(showtimes: Showtime[], query: SearchQuery): Showtime[] {
+  private filterShowtimes(
+    showtimes: Showtime[],
+    query: SearchQuery,
+  ): Showtime[] {
     const movieFilter = query.movieTitle?.trim().toLowerCase();
     const now = new Date();
     const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
     return showtimes.filter((showtime) => {
-      if (movieFilter && !showtime.movieTitle.toLowerCase().includes(movieFilter)) {
+      if (
+        movieFilter &&
+        !showtime.movieTitle.toLowerCase().includes(movieFilter)
+      ) {
         return false;
       }
 
@@ -374,7 +456,12 @@ export class CineplexClient {
         return false;
       }
 
-      if (!showtimeMatchesExperienceTypes(showtime.format, query.experienceTypes ?? [])) {
+      if (
+        !showtimeMatchesExperienceTypes(
+          showtime.format,
+          query.experienceTypes ?? [],
+        )
+      ) {
         return false;
       }
 
@@ -387,7 +474,10 @@ export class CineplexClient {
     });
   }
 
-  private matchesSnapshotFilters(result: SearchResult, query: SearchQuery): boolean {
+  private matchesSnapshotFilters(
+    result: SearchResult,
+    query: SearchQuery,
+  ): boolean {
     return (
       (!query.onlyZeroSold || result.snapshot.occupiedEstimate === 0) &&
       (!query.maxFiveSold || result.snapshot.occupiedEstimate <= 5) &&
@@ -396,23 +486,27 @@ export class CineplexClient {
   }
 }
 
-function sortResults(results: SearchResult[], sortBy: SortOption): SearchResult[] {
+function sortResults(
+  results: SearchResult[],
+  sortBy: SortOption,
+): SearchResult[] {
   return results.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
-    const primary =
-      sortBy.startsWith("distance")
-        ? compareOptionalNumber(a.distanceKm, b.distanceKm, direction)
-        : compareShowtime(a, b, direction);
-    const secondary =
-      sortBy.startsWith("distance")
-        ? compareShowtime(a, b, 1)
-        : compareOptionalNumber(a.distanceKm, b.distanceKm, 1);
+    const primary = sortBy.startsWith("distance")
+      ? compareOptionalNumber(a.distanceKm, b.distanceKm, direction)
+      : compareShowtime(a, b, direction);
+    const secondary = sortBy.startsWith("distance")
+      ? compareShowtime(a, b, 1)
+      : compareOptionalNumber(a.distanceKm, b.distanceKm, 1);
 
     return primary || secondary || compareLowOccupancy(a, b);
   });
 }
 
-function sortShowtimeCandidates(candidates: ShowtimeCandidate[], sortBy: SortOption): ShowtimeCandidate[] {
+function sortShowtimeCandidates(
+  candidates: ShowtimeCandidate[],
+  sortBy: SortOption,
+): ShowtimeCandidate[] {
   return candidates.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
 
@@ -430,7 +524,9 @@ function sortShowtimeCandidates(candidates: ShowtimeCandidate[], sortBy: SortOpt
   });
 }
 
-function interleaveCandidates(groups: ShowtimeCandidate[][]): ShowtimeCandidate[] {
+function interleaveCandidates(
+  groups: ShowtimeCandidate[][],
+): ShowtimeCandidate[] {
   const interleaved: ShowtimeCandidate[] = [];
   const longestGroup = Math.max(0, ...groups.map((group) => group.length));
 
@@ -448,10 +544,16 @@ function interleaveCandidates(groups: ShowtimeCandidate[][]): ShowtimeCandidate[
 }
 
 function dedupeShowtimes(showtimes: Showtime[]): Showtime[] {
-  return Array.from(new Map(showtimes.map((showtime) => [showtime.id, showtime])).values());
+  return Array.from(
+    new Map(showtimes.map((showtime) => [showtime.id, showtime])).values(),
+  );
 }
 
-function compareShowtime(a: SearchResult, b: SearchResult, direction: number): number {
+function compareShowtime(
+  a: SearchResult,
+  b: SearchResult,
+  direction: number,
+): number {
   return compareTimeValues(a.showtime.startsAt, b.showtime.startsAt, direction);
 }
 
@@ -459,7 +561,11 @@ function compareTimeValues(a: string, b: string, direction: number): number {
   return (new Date(a).getTime() - new Date(b).getTime()) * direction;
 }
 
-function compareOptionalNumber(a: number | undefined, b: number | undefined, direction: number): number {
+function compareOptionalNumber(
+  a: number | undefined,
+  b: number | undefined,
+  direction: number,
+): number {
   if (a === undefined && b === undefined) {
     return 0;
   }
@@ -477,16 +583,22 @@ function compareOptionalNumber(a: number | undefined, b: number | undefined, dir
 
 function compareLowOccupancy(a: SearchResult, b: SearchResult): number {
   return (
-    CONFIDENCE_RANK[a.snapshot.confidence] - CONFIDENCE_RANK[b.snapshot.confidence] ||
+    CONFIDENCE_RANK[a.snapshot.confidence] -
+      CONFIDENCE_RANK[b.snapshot.confidence] ||
     a.snapshot.occupiedEstimate - b.snapshot.occupiedEstimate
   );
 }
 
-function getDistanceFromOrigin(origin: Coordinates | undefined, theatre: Theatre): number | undefined {
-  return theatre.latitude !== undefined && theatre.longitude !== undefined && origin
+function getDistanceFromOrigin(
+  origin: Coordinates | undefined,
+  theatre: Theatre,
+): number | undefined {
+  return theatre.latitude !== undefined &&
+    theatre.longitude !== undefined &&
+    origin
     ? distanceKm(origin, {
         latitude: theatre.latitude,
-        longitude: theatre.longitude
+        longitude: theatre.longitude,
       })
     : undefined;
 }
@@ -505,7 +617,11 @@ function matchesMovieTitle(title: string, terms: string[]): boolean {
   return terms.every((term) => normalizedTitle.includes(term));
 }
 
-function compareMovieSuggestions(a: MovieSuggestion, b: MovieSuggestion, rawQuery: string): number {
+function compareMovieSuggestions(
+  a: MovieSuggestion,
+  b: MovieSuggestion,
+  rawQuery: string,
+): number {
   const query = rawQuery.trim().toLowerCase();
   const aTitle = a.title.toLowerCase();
   const bTitle = b.title.toLowerCase();
@@ -516,7 +632,11 @@ function compareMovieSuggestions(a: MovieSuggestion, b: MovieSuggestion, rawQuer
     return aStartsWithQuery ? -1 : 1;
   }
 
-  return b.theatreCount - a.theatreCount || b.showtimeCount - a.showtimeCount || a.title.localeCompare(b.title);
+  return (
+    b.theatreCount - a.theatreCount ||
+    b.showtimeCount - a.showtimeCount ||
+    a.title.localeCompare(b.title)
+  );
 }
 
 function toTheatre(theatre: CineplexTheatre): Theatre {
@@ -530,12 +650,19 @@ function toTheatre(theatre: CineplexTheatre): Theatre {
     postalCode: theatre.location?.postalCode,
     latitude: theatre.location?.geoLocation?.latitude,
     longitude: theatre.location?.geoLocation?.longitude,
-    amenities: [...(theatre.amenities ?? []), ...(theatre.accessibilities ?? [])],
-    isVip: theatre.isVIP ?? /vip/i.test(theatre.theatreName)
+    amenities: [
+      ...(theatre.amenities ?? []),
+      ...(theatre.accessibilities ?? []),
+    ],
+    isVip: theatre.isVIP ?? /vip/i.test(theatre.theatreName),
   };
 }
 
-function buildPublicSeatMapUrl(theatreId: string, session: CineplexSession, dbox: boolean): string {
+function buildPublicSeatMapUrl(
+  theatreId: string,
+  session: CineplexSession,
+  dbox: boolean,
+): string {
   const publicSeatMapUrl = normalizePublicSeatMapUrl(session.seatMapUrl);
 
   if (publicSeatMapUrl) {
@@ -571,18 +698,31 @@ function normalizePublicSeatMapUrl(rawUrl?: string): string | undefined {
 
 function matchesTheatreText(theatre: Theatre, text: string): boolean {
   const compactText = text.replace(/\s+/g, "");
-  const searchableFields = [theatre.name, theatre.city, theatre.province, theatre.address].filter(
-    (value): value is string => Boolean(value)
-  );
+  const searchableFields = [
+    theatre.name,
+    theatre.city,
+    theatre.province,
+    theatre.address,
+  ].filter((value): value is string => Boolean(value));
 
-  return searchableFields.some((value) => value.toLowerCase().includes(text)) ||
-    Boolean(theatre.postalCode?.toLowerCase().replace(/\s+/g, "").includes(compactText));
+  return (
+    searchableFields.some((value) => value.toLowerCase().includes(text)) ||
+    Boolean(
+      theatre.postalCode
+        ?.toLowerCase()
+        .replace(/\s+/g, "")
+        .includes(compactText),
+    )
+  );
 }
 
-function inferCoordinatesFromMatches(matches: Theatre[], text: string): Coordinates | undefined {
+function inferCoordinatesFromMatches(
+  matches: Theatre[],
+  text: string,
+): Coordinates | undefined {
   const coordinateMatches = matches.filter(
     (theatre): theatre is Theatre & { latitude: number; longitude: number } =>
-      theatre.latitude !== undefined && theatre.longitude !== undefined
+      theatre.latitude !== undefined && theatre.longitude !== undefined,
   );
 
   const normalizedText = text.replace(/\s+/g, "");
@@ -591,9 +731,13 @@ function inferCoordinatesFromMatches(matches: Theatre[], text: string): Coordina
       ? coordinateMatches
       : coordinateMatches.filter((theatre) => {
           const city = theatre.city.toLowerCase();
-          const postalCode = theatre.postalCode?.toLowerCase().replace(/\s+/g, "");
+          const postalCode = theatre.postalCode
+            ?.toLowerCase()
+            .replace(/\s+/g, "");
 
-          return city === text || Boolean(postalCode?.startsWith(normalizedText));
+          return (
+            city === text || Boolean(postalCode?.startsWith(normalizedText))
+          );
         });
 
   if (!strongMatches.length) {
@@ -601,12 +745,19 @@ function inferCoordinatesFromMatches(matches: Theatre[], text: string): Coordina
   }
 
   return {
-    latitude: strongMatches.reduce((sum, theatre) => sum + theatre.latitude, 0) / strongMatches.length,
-    longitude: strongMatches.reduce((sum, theatre) => sum + theatre.longitude, 0) / strongMatches.length
+    latitude:
+      strongMatches.reduce((sum, theatre) => sum + theatre.latitude, 0) /
+      strongMatches.length,
+    longitude:
+      strongMatches.reduce((sum, theatre) => sum + theatre.longitude, 0) /
+      strongMatches.length,
   };
 }
 
-function toRawSeats(layout: SeatLayout, availability: SeatAvailability): RawSeat[] {
+function toRawSeats(
+  layout: SeatLayout,
+  availability: SeatAvailability,
+): RawSeat[] {
   const availabilityBySeat = availability.seatAvailabilities ?? {};
   const seats = flattenSeats(layout);
 
@@ -615,7 +766,7 @@ function toRawSeats(layout: SeatLayout, availability: SeatAvailability): RawSeat
       id: seat.id,
       label: seat.label,
       type: seat.type,
-      status: "unknown"
+      status: "unknown",
     }));
   }
 
@@ -623,12 +774,14 @@ function toRawSeats(layout: SeatLayout, availability: SeatAvailability): RawSeat
     id: seat.id,
     label: seat.label,
     type: seat.type,
-    status: availabilityBySeat[seat.id] ?? "Available"
+    status: availabilityBySeat[seat.id] ?? "Available",
   }));
 }
 
-function flattenSeats(layout: SeatLayout): Array<{ id: string; label?: string; type?: string }> {
-  return [layout.standardSeats, layout.dboxSeats, layout.balconySeats].flatMap((area) =>
-    (area?.rows ?? []).flatMap((row) => row.seats ?? [])
+function flattenSeats(
+  layout: SeatLayout,
+): Array<{ id: string; label?: string; type?: string }> {
+  return [layout.standardSeats, layout.dboxSeats, layout.balconySeats].flatMap(
+    (area) => (area?.rows ?? []).flatMap((row) => row.seats ?? []),
   );
 }

@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "HowManySeats?",
-  description: "Find how many seats are left at nearby Cineplex showtimes."
+  description: "Find how many seats are left at nearby Cineplex showtimes.",
 };
 
 const uiModeBootstrapScript = `
@@ -23,11 +23,13 @@ const uiModeBootstrapScript = `
     if (savedMode === "fun" && !hasCookie) {
       document.documentElement.setAttribute("data-ui-mode-pending", "fun");
     }
-  } catch (error) {}
+  } catch {}
 })();
 `;
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
       <body>

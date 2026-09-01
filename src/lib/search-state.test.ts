@@ -5,7 +5,7 @@ import {
   getEffectiveFilters,
   makeDefaultSearchState,
   normalizeSearchState,
-  readSearchStateFromUrl
+  readSearchStateFromUrl,
 } from "./search-state";
 
 const TODAY = "2026-08-29";
@@ -24,9 +24,11 @@ test("round-trips a three-day search, formats, and Google coordinates through th
     endDate: "2026-08-31",
     latitude: 43.6532,
     longitude: -79.3832,
-    experienceTypes: ["IMAX", "UltraAVX"] as const
+    experienceTypes: ["IMAX", "UltraAVX"] as const,
   };
-  const parsed = readSearchStateFromUrl(`?${buildSearchParams({ ...original, experienceTypes: [...original.experienceTypes] })}`);
+  const parsed = readSearchStateFromUrl(
+    `?${buildSearchParams({ ...original, experienceTypes: [...original.experienceTypes] })}`,
+  );
   const normalized = normalizeSearchState(parsed ?? {}, TODAY);
 
   assert.equal(normalized.endDate, "2026-08-31");
@@ -47,4 +49,12 @@ test("old URLs no longer imply the five-or-fewer filter", () => {
   const parsed = readSearchStateFromUrl(`?location=Toronto&date=${TODAY}`);
 
   assert.equal(parsed?.filters?.maxFiveSold, false);
+});
+
+test("replaces an invalid URL date with today's date", () => {
+  const parsed = readSearchStateFromUrl("?location=Toronto&date=not-a-date");
+  const normalized = normalizeSearchState(parsed ?? {}, TODAY);
+
+  assert.equal(normalized.date, TODAY);
+  assert.equal(normalized.endDate, TODAY);
 });

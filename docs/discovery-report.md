@@ -1,90 +1,118 @@
-# Cineplex Technical Discovery Report
+# Cineplex technical discovery report
 
-Date: 2026-05-04
+Date: May 4, 2026
 
 ## Scope
 
-This report records the current safe discovery boundary for the prototype. It avoids login, payment entry, seat holds, CAPTCHA bypass, rate-limit bypass, and automated purchase actions.
+This report records the prototype's current safe discovery boundary. The
+prototype doesn't sign in, enter payment information, hold seats, bypass a
+CAPTCHA or rate limit, or automate ticket purchases.
 
-## Public Flow Observed
+## Public flow observed
 
-- Cineplex's promotions page describes the public path as selecting a theatre, date, movie, and showtime, then being taken to ticketing. It also says users may be prompted to log in before ticket purchase.
-- Cineplex states online booking enables advanced seat selection.
-- Cineplex's accessibility page describes wheelchair spaces, companion accommodations, closed captioning, described services, and sensory-friendly screenings. The classifier therefore keeps accessibility-related seats out of the default occupied estimate.
+Cineplex's promotions page describes this public flow: select a theatre, date,
+movie, and showtime, and then continue to ticketing. Cineplex might ask the
+customer to sign in before buying a ticket.
+
+Cineplex states that online booking provides advance seat selection. Its
+accessibility page describes wheelchair spaces, companion accommodations,
+closed captioning, described services, and sensory-friendly screenings. The
+classifier excludes accessibility-related seats from the default occupied
+estimate.
 
 Sources:
 
-- https://www.cineplex.com/promotions
-- https://www.cineplex.com/theatres/accessibility
-- https://www.cineplex.com/theatre/scotiabank-theatre-ottawa
+- [Cineplex promotions](https://www.cineplex.com/promotions)
+- [Cineplex accessibility](https://www.cineplex.com/theatres/accessibility)
+- [Scotiabank Theatre Ottawa](https://www.cineplex.com/theatre/scotiabank-theatre-ottawa)
 
 ## Findings
 
-### Are showtimes visible without login?
+### Showtimes without signing in
 
-Yes. Cineplex's public site bundle calls:
+Cineplex's public site bundle calls this endpoint:
 
 ```text
 GET https://apis.cineplex.com/prod/cpx/theatrical/api/v1/showtimes?language=en&locationId={theatreId}&date={date}
 ```
 
-This returns theatre, movie, format, session, `vistaSessionId`, `ticketingUrl`, `seatMapUrl`, sold-out flag, in-past flag, and reserved-seating flag.
+The response contains the theatre, movie, format, session,
+`vistaSessionId`, `ticketingUrl`, `seatMapUrl`, and the `isSoldOut`,
+`isInThePast`, and `isReservedSeating` fields.
 
-### Are seat maps visible without login?
+### Seat maps without signing in
 
-Yes for the preview flow tested. Cineplex's public preview page calls read-only GET endpoints:
+During the tested preview flow, Cineplex's public preview page calls these
+read-only GET endpoints:
 
 ```text
 GET https://apis.cineplex.com/prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout
 GET https://apis.cineplex.com/prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true
 ```
 
-These were tested without login and returned layout and availability JSON.
+A read-only test without signing in returned layout and availability JSON.
 
-### Does viewing the seat map create a temporary hold?
+### Temporary seat holds
 
-The verified preview calls do not create a hold. They are GET requests and are separate from the POST endpoint used by the site for reservation:
+The verified preview calls don't create a hold. They send GET requests and are
+separate from the POST endpoint that Cineplex uses to reserve seats:
 
 ```text
 POST /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/reserve-seats
 ```
 
-The prototype does not call that endpoint.
+The prototype doesn't call that endpoint.
 
-### Is there a public JSON endpoint behind the page?
+### Public JSON endpoints
 
-Yes. Public site bundles expose the theatrical showtime API and the ticketing preview seat APIs above. This prototype uses only those Cineplex public site GET endpoints and does not use MovieXchange directly.
+Public site bundles expose the theatrical showtime API and the ticketing
+preview seat APIs. The prototype calls these Cineplex public site GET endpoints
+and doesn't call MovieXchange directly.
 
-### Are seat statuses explicit or visual-only?
+### Seat status representation
 
-Explicit in JSON. The layout includes seat ids, labels, and types such as `Standard`, `Wheelchair`, and `Companion`. Preview availability maps seat ids to values observed as `Available`, `Occupied`, and `Broken`.
+The JSON response contains explicit statuses. The layout contains seat IDs,
+labels, and types such as `Standard`, `Wheelchair`, and `Companion`. Preview
+availability maps seat IDs to values observed as `Available`, `Occupied`, and
+`Broken`.
 
-### Does the flow differ by province, theatre, VIP, or event type?
+### Differences across theatres and formats
 
-Likely. The data model stores format, VIP, accessibility services, auditorium, theatre amenities, and unknown statuses separately so each theatre/format can be calibrated independently.
+The flow can differ by province, theatre, VIP offering, or event type. The data
+model stores format, VIP, accessibility services, auditorium, theatre
+amenities, and unknown statuses separately. This separation supports
+independent calibration for each theatre and format.
 
-## Live Verification
+## Live verification
 
-Read-only verification on May 4, 2026 against Scotiabank Theatre Ottawa returned live occupancy estimates including:
+A read-only verification on May 4, 2026, against Scotiabank Theatre Ottawa
+returned these occupancy estimates:
 
-- `499498`: 68 seats, 0 occupied, 68 available, not post-showtime.
-- `499490`: 84 seats, 12 occupied, 72 available, not post-showtime.
-- `499511`: 0 occupied / 64 sellable seats, with 4 accessibility seats tracked separately.
-- `496465`: 0 occupied / 344 sellable seats, with 11 accessibility seats tracked separately.
+- `499498`: 68 seats, 0 occupied, 68 available, and not post-showtime.
+- `499490`: 84 seats, 12 occupied, 72 available, and not post-showtime.
+- `499511`: 0 occupied seats out of 64 sellable seats, with 4 accessibility
+  seats tracked separately.
+- `496465`: 0 occupied seats out of 344 sellable seats, with 11 accessibility
+  seats tracked separately.
 
-## Compliance Risks
+## Compliance risks
 
-- Seat-map inspection may create temporary holds in some ticketing systems.
-- Login prompts may appear before seat selection.
-- Some statuses can mean sold, held, house-reserved, accessible-only, blocked, or unavailable for the selected ticket type.
+- Seat-map inspection might create temporary holds in some ticketing systems.
+- Cineplex might require sign-in before seat selection.
+- Some statuses can mean sold, held, house-reserved, accessibility-only,
+  blocked, or unavailable for the selected ticket type.
 - Frequent refreshes can create unnecessary load.
 
-## Guardrails Implemented
+## Implemented guardrails
 
-- No auto-buy path exists.
-- No login credential storage exists.
-- Seat inspection uses only preview GET endpoints.
-- The app does not call reserve, set-ticket, payment, or cart mutation endpoints.
-- Wheelchair and companion seats are counted as accessibility ambiguity, not sold.
-- Blocked, house-reserved, unavailable, aisle, and unknown seats are not counted as sold by default.
-- Scheduler policy defaults to low concurrency, request delays, short retries, and no refresh after showtime start.
+- The app doesn't buy tickets.
+- The app doesn't store Cineplex sign-in credentials.
+- Seat inspection calls read-only preview GET endpoints.
+- The app doesn't call `reserve-seats`, `set-tickets`, payment, or cart mutation
+  endpoints.
+- The classifier treats wheelchair and companion seats as accessibility
+  ambiguity, not sold seats.
+- The classifier doesn't count blocked, house-reserved, unavailable, aisle, or
+  unknown seats as sold by default.
+- The scheduler defaults to low concurrency, delayed requests, short retry
+  windows, and no refresh after showtime starts.

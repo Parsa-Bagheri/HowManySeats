@@ -4,9 +4,15 @@ const STATUS_KEYWORDS: Array<[SeatStatus, RegExp]> = [
   ["wheelchair", /\b(wheelchair|accessible|mobility)\b/i],
   ["companion", /\b(companion|support person)\b/i],
   ["sold", /\b(sold|occupied|taken|unavailable sold)\b/i],
-  ["reserved", /\b(reserved|held|hold|selected|selected by another|temporarily)\b/i],
-  ["blocked", /\b(blocked|house|broken|closed|unavailable|not selectable|aisle)\b/i],
-  ["available", /\b(available|open|selectable)\b/i]
+  [
+    "reserved",
+    /\b(reserved|held|hold|selected|selected by another|temporarily)\b/i,
+  ],
+  [
+    "blocked",
+    /\b(blocked|house|broken|closed|unavailable|not selectable|aisle)\b/i,
+  ],
+  ["available", /\b(available|open|selectable)\b/i],
 ];
 
 function classifySeatStatus(rawSeat: RawSeat): SeatStatus {
@@ -17,7 +23,7 @@ function classifySeatStatus(rawSeat: RawSeat): SeatStatus {
     rawSeat.className,
     rawSeat.label,
     rawSeat.disabled === true ? "disabled" : "",
-    rawSeat.selectable === true ? "selectable available" : ""
+    rawSeat.selectable === true ? "selectable available" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -31,7 +37,9 @@ function classifySeatStatus(rawSeat: RawSeat): SeatStatus {
   return "unknown";
 }
 
-function scoreShowing(snapshot: Pick<SeatSnapshot, "occupiedEstimate" | "unknownCount">): Confidence {
+function scoreShowing(
+  snapshot: Pick<SeatSnapshot, "occupiedEstimate" | "unknownCount">,
+): Confidence {
   if (snapshot.occupiedEstimate === 0 && snapshot.unknownCount === 0) {
     return "high";
   }
@@ -47,7 +55,11 @@ function scoreShowing(snapshot: Pick<SeatSnapshot, "occupiedEstimate" | "unknown
   return "not-empty";
 }
 
-export function buildSeatSnapshot(showtimeId: string, rawSeats: RawSeat[], checkedAt = new Date()): SeatSnapshot {
+export function buildSeatSnapshot(
+  showtimeId: string,
+  rawSeats: RawSeat[],
+  checkedAt = new Date(),
+): SeatSnapshot {
   const counts: Record<SeatStatus, number> = {
     available: 0,
     sold: 0,
@@ -55,7 +67,7 @@ export function buildSeatSnapshot(showtimeId: string, rawSeats: RawSeat[], check
     blocked: 0,
     wheelchair: 0,
     companion: 0,
-    unknown: 0
+    unknown: 0,
   };
 
   for (const seat of rawSeats) {
@@ -74,25 +86,13 @@ export function buildSeatSnapshot(showtimeId: string, rawSeats: RawSeat[], check
     blockedCount: counts.blocked,
     accessibilityCount: counts.wheelchair + counts.companion,
     unknownCount: counts.unknown,
-    confidence: scoreShowing({ occupiedEstimate, unknownCount: counts.unknown }),
+    confidence: scoreShowing({
+      occupiedEstimate,
+      unknownCount: counts.unknown,
+    }),
     rawSnapshot: {
       counts,
-      seats: rawSeats
-    }
+      seats: rawSeats,
+    },
   };
-}
-
-export function formatConfidence(confidence: Confidence): string {
-  switch (confidence) {
-    case "high":
-      return "(Most likely) empty";
-    case "medium":
-      return "Likely empty - medium confidence";
-    case "low-but-interesting":
-      return "Likely low occupancy";
-    case "not-empty":
-      return "Not likely empty";
-    default:
-      return "Unknown confidence";
-  }
 }

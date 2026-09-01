@@ -11,6 +11,7 @@ coverage
 playwright-report
 test-results
 next-dev*.log
+next-start*.log
 ui-check*.png
 docs/screenshots/*.png
 docs/screenshots/*.jpg

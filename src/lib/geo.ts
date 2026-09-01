@@ -20,7 +20,11 @@ type ZippopotamusResult = {
 };
 
 const KNOWN_LOCATIONS: KnownLocation[] = [
-  { match: /\b(toronto|yonge|dundas)\b/i, latitude: 43.6532, longitude: -79.3832 },
+  {
+    match: /\b(toronto|yonge|dundas)\b/i,
+    latitude: 43.6532,
+    longitude: -79.3832,
+  },
   { match: /\bwaterloo\b/i, latitude: 43.4643, longitude: -80.5204 },
   { match: /\bkitchener\b/i, latitude: 43.4516, longitude: -80.4925 },
   { match: /\bcambridge\b/i, latitude: 43.3616, longitude: -80.3144 },
@@ -28,13 +32,13 @@ const KNOWN_LOCATIONS: KnownLocation[] = [
   { match: /\bvancouver\b/i, latitude: 49.2827, longitude: -123.1207 },
   { match: /\bsurrey\b/i, latitude: 49.1044, longitude: -122.8011 },
   { match: /\bcalgary\b/i, latitude: 51.0447, longitude: -114.0719 },
-  { match: /\bmontreal\b/i, latitude: 45.5019, longitude: -73.5674 }
+  { match: /\bmontreal\b/i, latitude: 45.5019, longitude: -73.5674 },
 ];
 
 const FSA_FALLBACKS: Record<string, Coordinates> = {
   M5V: { latitude: 43.6426, longitude: -79.3871 },
   N2L: { latitude: 43.4731, longitude: -80.537 },
-  V3Z: { latitude: 49.0539, longitude: -122.7845 }
+  V3Z: { latitude: 49.0539, longitude: -122.7845 },
 };
 
 const PROVINCE_CODES: Record<string, string> = {
@@ -63,12 +67,14 @@ const PROVINCE_CODES: Record<string, string> = {
   sk: "SK",
   saskatchewan: "SK",
   yt: "YT",
-  yukon: "YT"
+  yukon: "YT",
 };
 
 const geocodeCache = new Map<string, Coordinates | undefined>();
 
-export async function resolveLocation(input: string): Promise<Coordinates | undefined> {
+export async function resolveLocation(
+  input: string,
+): Promise<Coordinates | undefined> {
   const normalized = normalizeLocationInput(input);
 
   if (!normalized || getProvinceCode(normalized)) {
@@ -83,8 +89,10 @@ export async function resolveLocation(input: string): Promise<Coordinates | unde
 
   const fallback = resolveKnownLocation(normalized);
   const coordinates = isCanadianPostalInput(normalized)
-    ? (await geocodeCanadianLocation(normalized)) ?? (await geocodeCanadianPostalArea(normalized)) ?? fallback
-    : fallback ?? (await geocodeCanadianLocation(normalized));
+    ? ((await geocodeCanadianLocation(normalized)) ??
+      (await geocodeCanadianPostalArea(normalized)) ??
+      fallback)
+    : (fallback ?? (await geocodeCanadianLocation(normalized)));
 
   geocodeCache.set(cacheKey, coordinates);
   return coordinates;
@@ -142,7 +150,9 @@ function extractForwardSortationArea(input: string): string | undefined {
   return undefined;
 }
 
-async function geocodeCanadianLocation(input: string): Promise<Coordinates | undefined> {
+async function geocodeCanadianLocation(
+  input: string,
+): Promise<Coordinates | undefined> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3500);
 
@@ -152,10 +162,10 @@ async function geocodeCanadianLocation(input: string): Promise<Coordinates | und
       headers: {
         Accept: "application/json",
         "Accept-Language": "en-CA,en;q=0.9",
-        "User-Agent": "how-many-seats/0.1 local-search"
+        "User-Agent": "how-many-seats/0.1 local-search",
       },
       signal: controller.signal,
-      cache: "force-cache"
+      cache: "force-cache",
     });
 
     if (!response.ok) {
@@ -179,7 +189,9 @@ async function geocodeCanadianLocation(input: string): Promise<Coordinates | und
   }
 }
 
-async function geocodeCanadianPostalArea(input: string): Promise<Coordinates | undefined> {
+async function geocodeCanadianPostalArea(
+  input: string,
+): Promise<Coordinates | undefined> {
   const fsa = extractForwardSortationArea(input);
 
   if (!fsa) {
@@ -190,13 +202,16 @@ async function geocodeCanadianPostalArea(input: string): Promise<Coordinates | u
   const timeout = setTimeout(() => controller.abort(), 3500);
 
   try {
-    const response = await fetch(`https://api.zippopotam.us/ca/${encodeURIComponent(fsa)}`, {
-      headers: {
-        Accept: "application/json"
+    const response = await fetch(
+      `https://api.zippopotam.us/ca/${encodeURIComponent(fsa)}`,
+      {
+        headers: {
+          Accept: "application/json",
+        },
+        signal: controller.signal,
+        cache: "force-cache",
       },
-      signal: controller.signal,
-      cache: "force-cache"
-    });
+    );
 
     if (!response.ok) {
       return undefined;
@@ -230,7 +245,8 @@ function buildNominatimUrl(input: string): string {
 
   if (fsa) {
     const compact = input.replace(/\s+/g, "").toUpperCase();
-    const postalCode = compact.length === 6 ? `${compact.slice(0, 3)} ${compact.slice(3)}` : fsa;
+    const postalCode =
+      compact.length === 6 ? `${compact.slice(0, 3)} ${compact.slice(3)}` : fsa;
     url.searchParams.set("postalcode", postalCode);
   } else {
     url.searchParams.set("q", `${input}, Canada`);

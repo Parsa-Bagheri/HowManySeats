@@ -1,40 +1,43 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CineplexClient } from "@/lib/cineplex-client";
-import { getSearchDates, isValidDateInput } from "@/lib/date-range";
+import {
+  searchAreaSchema,
+  searchParamsToRecord,
+  validateSearchArea,
+} from "@/lib/search-request";
 
-const suggestionSchema = z.object({
-  location: z.string().min(1),
-  date: z.string().refine(isValidDateInput),
-  endDate: z.string().refine(isValidDateInput).optional(),
-  radiusKm: z.coerce.number().min(1).max(250),
-  latitude: z.coerce.number().min(-90).max(90).optional(),
-  longitude: z.coerce.number().min(-180).max(180).optional(),
+const suggestionSchema = searchAreaSchema.extend({
   query: z.string().min(2).max(120),
-  limit: z.coerce.number().int().min(1).max(12).optional()
+  limit: z.coerce.number().int().min(1).max(12).optional(),
 });
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const parsed = suggestionSchema.safeParse(Object.fromEntries(url.searchParams.entries()));
+  const parsed = suggestionSchema.safeParse(
+    searchParamsToRecord(url.searchParams),
+  );
 
   if (!parsed.success) {
     return NextResponse.json(
       {
-        error: "Invalid suggestion query",
-        issues: parsed.error.flatten()
+        error: "Check the movie title and search fields, then try again.",
+        issues: parsed.error.flatten(),
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  const hasCompleteCoordinates =
-    (parsed.data.latitude === undefined && parsed.data.longitude === undefined) ||
-    (parsed.data.latitude !== undefined && parsed.data.longitude !== undefined);
-  const dates = getSearchDates(parsed.data.date, parsed.data.endDate ?? parsed.data.date);
+  const validation = validateSearchArea(parsed.data);
 
-  if (!dates || !hasCompleteCoordinates) {
-    return NextResponse.json({ error: "Invalid suggestion query" }, { status: 400 });
+  if (!validation.isValid) {
+    return NextResponse.json(
+      {
+        error: "Check the movie title and search fields, then try again.",
+        issues: validation.issues,
+      },
+      { status: 400 },
+    );
   }
 
   try {
@@ -46,18 +49,19 @@ export async function GET(request: Request) {
       latitude: parsed.data.latitude,
       longitude: parsed.data.longitude,
       movieTitle: parsed.data.query,
-      limit: parsed.data.limit
+      limit: parsed.data.limit,
     });
 
     return NextResponse.json({ suggestions });
   } catch (error) {
-    console.error("Live Cineplex movie suggestions failed", error);
+    console.error("Cineplex movie suggestion request failed", error);
 
     return NextResponse.json(
       {
-        error: "Live Cineplex movie suggestions failed"
+        error:
+          "Cineplex movie suggestions are temporarily unavailable. Try again.",
       },
-      { status: 502 }
+      { status: 502 },
     );
   }
 }

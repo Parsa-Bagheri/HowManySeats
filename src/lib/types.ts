@@ -9,8 +9,10 @@ export type SeatStatus =
   | "companion"
   | "unknown";
 
-export type Confidence = "high" | "medium" | "low-but-interesting" | "not-empty" | "unknown";
-export type SortOption = "distance-asc" | "distance-desc" | "time-asc" | "time-desc";
+export type Confidence =
+  "high" | "medium" | "low-but-interesting" | "not-empty" | "unknown";
+export type SortOption =
+  "distance-asc" | "distance-desc" | "time-asc" | "time-desc";
 
 export type Theatre = {
   id: string;

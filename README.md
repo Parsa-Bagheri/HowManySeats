@@ -1,26 +1,31 @@
 # HowManySeats?
 
-A Next.js app for seeing estimated occupied and open seats at nearby Cineplex showtimes.
+The app estimates occupied and open seats at nearby Cineplex showtimes.
 
-## What Is Included
+## What's included
 
-- Next.js + Tailwind search UI
-- Optional Google Maps address suggestions with a manual-input fallback
-- One-to-three-day searches and multi-select theatre-format filtering
-- Node.js/TypeScript API route
-- CLI collector using live Cineplex showtime and preview seat occupancy data
-- Seat classifier and confidence scoring
+- Next.js and Tailwind CSS search interface
+- Optional Google Maps address suggestions with a manual-entry fallback
+- Search ranges of up to three days
+- A multiselect theatre-format filter
+- A Node.js API route written in TypeScript
+- A command-line interface (CLI) collector that uses live Cineplex showtime and
+  preview seat-occupancy data
+- Seat classification and confidence scoring
 - Discovery, schema, and compliance notes
 
-Live collection uses Cineplex's public site APIs:
+The app uses these Cineplex public site APIs:
 
 - `GET /prod/cpx/theatrical/api/v1/showtimes`
 - `GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout`
 - `GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true`
 
-It does not call `reserve-seats`, `set-tickets`, payment, cart mutation, login, or checkout endpoints.
+The app doesn't call `reserve-seats`, `set-tickets`, payment, cart mutation,
+sign-in, or checkout endpoints.
 
-## Setup
+## Set up
+
+Run these commands:
 
 ```bash
 npm install
@@ -28,19 +33,26 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open the [local app](http://localhost:3000).
 
-To enable Google Maps address suggestions, add a browser-restricted Google Maps API key to
-`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. Enable Maps JavaScript API and Places API (New) for that key.
-Without it, the same field remains available as a normal address, postal-code, or city input.
+To enable Google Maps address suggestions:
 
-## CLI
+1. Add a browser-restricted Google Maps API key to
+   `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
+2. Enable the Maps JavaScript API and Places API (New) for the key.
+
+If you don't add a key, the field continues to accept a manually entered
+address, postal code, or city.
+
+## Use the command-line collector
+
+Run the collector with a location, date, and radius:
 
 ```bash
 npm run collect -- --location="Ottawa" --date="2026-05-05" --radius=25
 ```
 
-Example output:
+The command returns output like this:
 
 ```json
 [
@@ -56,26 +68,32 @@ Example output:
     "accessibility_count": 4,
     "unknown_count": 0,
     "confidence": "high",
-    "ticket_url": "https://www.cineplex.com/en-Mobile/ticketing/preview?theatreId=7311&showtimeId=125435&dbox=False"
+    "ticket_url": "https://www.cineplex.com/en-Mobile/ticketing/preview"
   }
 ]
 ```
 
-## Live Data Notes
+## Live data notes
 
-Seat status mapping:
+The app maps seat statuses as follows:
 
-- Layout seat type `Wheelchair` or `Companion` is counted in `accessibility_count`, not occupied.
-- Preview availability `Available` is counted as available.
-- Preview availability `Occupied` is counted as occupied estimate.
-- Preview availability `Broken`, unavailable, blocked, or house-reserved-like values are counted as blocked.
-- Unknown values are counted in `unknown_count`.
-- Empty availability for a post-showtime response is treated as unknown, not available.
+- Layout types `Wheelchair` and `Companion` increment `accessibility_count`,
+  not the occupied estimate.
+- Preview value `Available` increments `available_count`.
+- Preview value `Occupied` increments the occupied estimate.
+- Values such as `Broken`, unavailable, blocked, or house-reserved increment
+  `blocked_count`.
+- Unrecognized values increment `unknown_count`.
+- A post-showtime response with no availability increments `unknown_count`
+  instead of `available_count`.
 
-## Optional Schema
+## Optional schema
 
-The original product plan includes Postgres persistence. The schema is kept in `db/migrations/001_init.sql`, but the current app runs directly from live Cineplex preview data and does not require Postgres or Redis.
+The initial product plan includes PostgreSQL persistence. The current app reads
+live Cineplex preview data and doesn't require PostgreSQL or Redis. The optional
+schema is in `db/migrations/001_init.sql`.
 
 ## Acknowledgment
 
-HowManySeats? was inspired by Riley Walz's [Empty Screenings](https://walzr.com/empty-screenings), which explores the same private-theatre idea.
+Riley Walz's [Empty Screenings](https://walzr.com/empty-screenings) inspired
+this project. It explores the same private-theatre idea.

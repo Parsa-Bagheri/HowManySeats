@@ -12,7 +12,7 @@ type Args = {
 const timeFormatter = new Intl.DateTimeFormat("en-CA", {
   hour: "2-digit",
   minute: "2-digit",
-  hourCycle: "h23"
+  hourCycle: "h23",
 });
 
 async function main() {
@@ -23,10 +23,12 @@ async function main() {
     date: args.date ?? new Date().toISOString().slice(0, 10),
     radiusKm: args.radius ?? 25,
     movieTitle: args.movie,
-    maxFiveSold: false
+    maxFiveSold: false,
   });
 
-  process.stdout.write(`${JSON.stringify(results.map(toCliResult), null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(results.map(toCliResult), null, 2)}\n`,
+  );
 }
 
 function parseArgs(argv: string[]): Args {
@@ -76,11 +78,13 @@ function toCliResult(result: SearchResult) {
     accessibility_count: result.snapshot.accessibilityCount,
     unknown_count: result.snapshot.unknownCount,
     confidence: result.snapshot.confidence,
-    ticket_url: result.showtime.ticketUrl
+    ticket_url: result.showtime.ticketUrl,
   };
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(
+    `${error instanceof Error ? error.message : String(error)}\n`,
+  );
   process.exitCode = 1;
 });
