@@ -91,6 +91,7 @@ type SearchViewProps = {
   setUiMode: (mode: UiMode) => void;
   showThemePrompt: boolean;
   sortBy: SortOption;
+  today: string;
   uiMode: UiMode;
   onDismissThemePrompt: () => void;
   updateEndDate: (value: string) => void;
@@ -445,6 +446,7 @@ export default function HomePageClient({
     setUiMode,
     showThemePrompt,
     sortBy,
+    today,
     uiMode,
     onDismissThemePrompt: dismissThemePrompt,
     updateEndDate,
@@ -508,6 +510,7 @@ function CleanHomeView({
   setUiMode,
   showThemePrompt,
   sortBy,
+  today,
   uiMode,
   onDismissThemePrompt,
   updateEndDate,
@@ -546,6 +549,7 @@ function CleanHomeView({
                 date={date}
                 endDate={endDate}
                 mode="clean"
+                today={today}
                 updateEndDate={updateEndDate}
                 updateStartDate={updateStartDate}
               />
@@ -712,6 +716,7 @@ function FunHomeView({
   setUiMode,
   showThemePrompt,
   sortBy,
+  today,
   uiMode,
   onDismissThemePrompt,
   updateEndDate,
@@ -804,6 +809,7 @@ function FunHomeView({
                 date={date}
                 endDate={endDate}
                 mode="fun"
+                today={today}
                 updateEndDate={updateEndDate}
                 updateStartDate={updateStartDate}
               />
@@ -971,12 +977,14 @@ function DateRangeFields({
   date,
   endDate,
   mode,
+  today,
   updateEndDate,
   updateStartDate,
 }: {
   date: string;
   endDate: string;
   mode: UiMode;
+  today: string;
   updateEndDate: (value: string) => void;
   updateStartDate: (value: string) => void;
 }) {
@@ -999,7 +1007,7 @@ function DateRangeFields({
           className={inputClass}
           type="date"
           value={date}
-          min={getLocalDateInputValue()}
+          min={today}
           onChange={(event) => updateStartDate(event.target.value)}
           required
         />
