@@ -599,29 +599,18 @@ function FunHomeView(props: SearchViewProps) {
   return (
     <main className="chaos-stage min-h-screen overflow-hidden px-3 py-4 text-black sm:px-5 lg:px-8">
       <div className="relative z-10 mx-auto flex w-full max-w-[1500px] flex-col gap-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <div className="min-w-0 flex-1">
-            <MarqueeStrip />
-          </div>
-          <div className="shrink-0 sm:pl-3">
-            <ModeSwitchNudge
-              uiMode={uiMode}
-              show={showThemePrompt}
-              onChange={setUiMode}
-              onDismiss={onDismissThemePrompt}
-            />
-          </div>
+        <div className="flex justify-end">
+          <ModeSwitchNudge
+            uiMode={uiMode}
+            show={showThemePrompt}
+            onChange={setUiMode}
+            onDismiss={onDismissThemePrompt}
+          />
         </div>
 
         <header
           className={`relative overflow-hidden border-[6px] border-black bg-white ${funPanelShadow} sm:-rotate-[0.25deg]`}
         >
-          <div
-            className="pointer-events-none absolute -right-12 top-5 hidden rotate-12 border-4 border-black bg-[#00e676] px-10 py-2 text-sm font-black uppercase tracking-[0.16em] shadow-[6px_6px_0_#111111] md:block"
-            aria-hidden="true"
-          >
-            unofficial
-          </div>
           <div className="grid gap-0 lg:grid-cols-[1fr_auto]">
             <div className="hero-blast relative border-b-[6px] border-black bg-[#ff4fa3] p-4 sm:p-7 lg:border-b-0 lg:border-r-[6px]">
               <h1 className="relative max-w-5xl text-[clamp(2.5rem,10vw,7.75rem)] font-black leading-[0.86] text-black">
@@ -1566,32 +1555,6 @@ const CleanResultList = memo(function CleanResultList({
     </div>
   );
 });
-
-function MarqueeStrip() {
-  const chunks = [
-    "seat availability",
-    "seat availability",
-    "seat availability",
-  ];
-
-  return (
-    <div
-      className="marquee-strip border-[6px] border-black bg-black text-[#f7e900] shadow-[8px_8px_0_#111111]"
-      aria-hidden="true"
-    >
-      <div className="marquee-track">
-        {[...chunks, ...chunks].map((chunk, index) => (
-          <span
-            className="marquee-chunk text-[0.68rem] font-black uppercase tracking-[0.08em] sm:text-[0.74rem]"
-            key={`${chunk}-${index}`}
-          >
-            {chunk}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function HeaderStat({
   accent,

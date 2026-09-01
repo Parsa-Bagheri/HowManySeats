@@ -348,48 +348,6 @@ a {
     #050505;
 }
 
-.marquee-strip {
-  overflow: hidden;
-  white-space: nowrap;
-  transform: rotate(0.45deg);
-  color: #111111;
-  background: repeating-linear-gradient(
-    135deg,
-    #f7e900 0 18px,
-    #f7e900 18px 34px,
-    #111111 34px 50px,
-    #111111 50px 66px
-  );
-}
-
-.marquee-track {
-  display: flex;
-  width: max-content;
-  animation: marquee-run 20s linear infinite;
-  will-change: transform;
-}
-
-.marquee-chunk {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.55rem 0.72rem;
-  text-shadow:
-    2px 2px 0 #ffffff,
-    -1px -1px 0 #ffffff;
-}
-
-.marquee-chunk::after {
-  display: inline-block;
-  width: 0.5rem;
-  height: 0.5rem;
-  margin-left: 0.72rem;
-  content: "";
-  background: #ff4fa3;
-  border: 2px solid #111111;
-  box-shadow: 2px 2px 0 #ffffff;
-  transform: rotate(45deg);
-}
-
 .chaos-card {
   transition:
     transform 160ms ease,
@@ -422,16 +380,6 @@ a {
       rgba(255, 79, 163, 0.52) 26px 38px
     ),
     #f7e900;
-}
-
-@keyframes marquee-run {
-  from {
-    transform: translateX(0);
-  }
-
-  to {
-    transform: translateX(-50%);
-  }
 }
 
 @keyframes twitch {
@@ -484,7 +432,6 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .marquee-track,
   .fun-throbber-panel::before {
     animation: none;
   }
