@@ -1,4 +1,4 @@
-import { isValidDateInput, normalizeEndDate } from "./date-range";
+import { addDays, isValidDateInput, normalizeEndDate } from "./date-range";
 import {
   parseShowtimeExperienceTypes,
   type ShowtimeExperienceType,
@@ -42,9 +42,9 @@ export function makeDefaultSearchState(
   today = getLocalDateInputValue(),
 ): SearchState {
   return {
-    location: "Toronto",
+    location: "",
     date: today,
-    endDate: today,
+    endDate: addDays(today, 1),
     radiusKm: "25",
     movieTitle: "",
     experienceTypes: [],

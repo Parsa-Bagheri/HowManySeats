@@ -301,7 +301,7 @@ export default function HomePageClient({
     if (!saved) {
       if (localToday !== initialToday) {
         setDate(localToday);
-        setEndDate(localToday);
+        setEndDate(addDays(localToday, 1));
       }
       return;
     }

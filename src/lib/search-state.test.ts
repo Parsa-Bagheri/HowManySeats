@@ -13,6 +13,9 @@ const TODAY = "2026-08-29";
 test("starts with no occupancy, time, accessibility, VIP, or format filters", () => {
   const state = makeDefaultSearchState(TODAY);
 
+  assert.equal(state.location, "");
+  assert.equal(state.date, TODAY);
+  assert.equal(state.endDate, "2026-08-30");
   assert.deepEqual(state.experienceTypes, []);
   assert.equal(Object.values(state.filters).some(Boolean), false);
 });
