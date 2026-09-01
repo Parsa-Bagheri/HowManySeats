@@ -56,6 +56,7 @@ import {
 
 type HomePageClientProps = {
   hasInitialUiModeCookie: boolean;
+  initialToday: string;
   initialUiMode: UiMode;
 };
 
@@ -131,10 +132,14 @@ const funCardShadow = "shadow-[10px_10px_0_#111111]";
 
 export default function HomePageClient({
   hasInitialUiModeCookie,
+  initialToday,
   initialUiMode,
 }: HomePageClientProps) {
-  const today = getLocalDateInputValue();
-  const initialState = useMemo(() => makeDefaultSearchState(), []);
+  const initialState = useMemo(
+    () => makeDefaultSearchState(initialToday),
+    [initialToday],
+  );
+  const [today, setToday] = useState(initialToday);
   const [location, setLocation] = useState(initialState.location);
   const [date, setDate] = useState(initialState.date);
   const [endDate, setEndDate] = useState(initialState.endDate);
@@ -288,13 +293,19 @@ export default function HomePageClient({
     }
 
     loadedSavedState.current = true;
+    const localToday = getLocalDateInputValue();
+    setToday(localToday);
     const saved = readSearchStateFromUrl(window.location.search);
 
     if (!saved) {
+      if (localToday !== initialToday) {
+        setDate(localToday);
+        setEndDate(localToday);
+      }
       return;
     }
 
-    const state = normalizeSearchState(saved);
+    const state = normalizeSearchState(saved, localToday);
     setLocation(state.location);
     setDate(state.date);
     setEndDate(state.endDate);
@@ -308,7 +319,7 @@ export default function HomePageClient({
     setHasSearched(false);
     setResults([]);
     setError(undefined);
-  }, []);
+  }, [initialToday]);
 
   useEffect(() => {
     const query = movieTitle.trim();
