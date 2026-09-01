@@ -25,10 +25,6 @@ body {
   letter-spacing: 0;
 }
 
-html[data-ui-mode-pending="fun"] body > main {
-  opacity: 0;
-}
-
 button,
 input,
 select {
@@ -87,6 +83,16 @@ a {
   color-scheme: light;
   background:
     repeating-linear-gradient(
+      90deg,
+      transparent 0 58px,
+      rgba(17, 17, 17, 0.24) 58px 62px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 58px,
+      rgba(17, 17, 17, 0.24) 58px 62px
+    ),
+    repeating-linear-gradient(
       135deg,
       transparent 0 12px,
       rgba(255, 79, 163, 0.36) 12px 16px,
@@ -100,6 +106,8 @@ a {
     linear-gradient(#111111 2px, transparent 2px),
     linear-gradient(90deg, #111111 2px, transparent 2px), #f7e900;
   background-size:
+    auto,
+    auto,
     120px 120px,
     96px 96px,
     34px 34px,
@@ -115,26 +123,6 @@ a {
 .chaos-stage ::selection {
   background: #ff4fa3;
   color: #111111;
-}
-
-.chaos-stage::before {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  content: "";
-  background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 58px,
-      rgba(17, 17, 17, 0.24) 58px 62px
-    ),
-    repeating-linear-gradient(
-      0deg,
-      transparent 0 58px,
-      rgba(17, 17, 17, 0.24) 58px 62px
-    );
-  mix-blend-mode: multiply;
 }
 
 .chaos-stage::after {
@@ -234,72 +222,29 @@ a {
   opacity: 0.86;
 }
 
-.fun-fire-sticker {
+.fun-switch-flames::after {
   position: absolute;
+  inset: 0;
   z-index: 1;
-  width: 3.8rem;
-  aspect-ratio: 1;
-  overflow: hidden;
-  mix-blend-mode: multiply;
   pointer-events: none;
+  content: "";
+  background: url("https://media.tenor.com/yrvwkbrsHpEAAAAS/fire-lit.gif") center / 3.8rem 3.8rem repeat;
   filter: drop-shadow(0 0 0.34rem rgba(255, 90, 0, 0.95));
-}
-
-.fun-fire-sticker iframe {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  pointer-events: none;
-  transform: translateY(-18%) scale(1.65);
-  transform-origin: center;
-}
-
-.fun-fire-top-left {
-  top: -0.38rem;
-  left: 0.35rem;
-  transform: rotate(-8deg);
-}
-
-.fun-fire-top-center {
-  top: -0.45rem;
-  left: 50%;
-  width: 3.85rem;
-  transform: translateX(-50%);
-}
-
-.fun-fire-top-right {
-  top: -0.38rem;
-  right: 0.35rem;
-  transform: rotate(8deg);
-}
-
-.fun-fire-bottom-left {
-  bottom: -0.34rem;
-  left: 0.45rem;
-  transform: rotate(-4deg);
-}
-
-.fun-fire-bottom-right {
-  right: 0.45rem;
-  bottom: -0.34rem;
-  transform: rotate(4deg);
-}
-
-.fun-fire-left {
-  top: 50%;
-  left: -0.32rem;
-  transform: translateY(-50%) rotate(-12deg);
-}
-
-.fun-fire-right {
-  top: 50%;
-  right: -0.32rem;
-  transform: translateY(-50%) rotate(12deg);
+  mix-blend-mode: multiply;
 }
 
 .fun-throbber-panel {
+  position: relative;
   overflow: hidden;
+  isolation: isolate;
+  background: #f7e900;
+}
+
+.fun-throbber-panel::before {
+  position: absolute;
+  inset: -40%;
+  z-index: 0;
+  content: "";
   background:
     repeating-linear-gradient(
       -12deg,
@@ -308,7 +253,13 @@ a {
       #ff4fa3 38px 52px
     ),
     #f7e900;
-  background-size: 130% 130%;
+  transform: translate3d(-32px, 0, 0);
+  will-change: transform;
+}
+
+.fun-throbber-panel > * {
+  position: relative;
+  z-index: 1;
 }
 
 .search-spinner {
@@ -415,6 +366,7 @@ a {
   display: flex;
   width: max-content;
   animation: marquee-run 20s linear infinite;
+  will-change: transform;
 }
 
 .marquee-chunk {
@@ -442,6 +394,11 @@ a {
   transition:
     transform 160ms ease,
     box-shadow 160ms ease;
+}
+
+.result-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 18rem;
 }
 
 .chaos-card:nth-child(odd) {
@@ -508,16 +465,16 @@ a {
 
 @keyframes fun-throbber-panel-shift {
   from {
-    background-position: 0 0;
+    transform: translate3d(-32px, 0, 0);
   }
 
   to {
-    background-position: 64px 0;
+    transform: translate3d(32px, 0, 0);
   }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .fun-throbber-panel {
+  .fun-throbber-panel::before {
     animation: fun-throbber-panel-shift 850ms linear infinite;
   }
 
@@ -527,7 +484,9 @@ a {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .marquee-track {
-    animation-duration: 45s;
+  .marquee-track,
+  .search-spinner,
+  .fun-throbber-panel::before {
+    animation: none;
   }
 }

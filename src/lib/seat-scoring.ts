@@ -19,11 +19,6 @@ function classifySeatStatus(rawSeat: RawSeat): SeatStatus {
   const text = [
     rawSeat.status,
     rawSeat.type,
-    rawSeat.ariaLabel,
-    rawSeat.className,
-    rawSeat.label,
-    rawSeat.disabled === true ? "disabled" : "",
-    rawSeat.selectable === true ? "selectable available" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -90,9 +85,5 @@ export function buildSeatSnapshot(
       occupiedEstimate,
       unknownCount: counts.unknown,
     }),
-    rawSnapshot: {
-      counts,
-      seats: rawSeats,
-    },
   };
 }

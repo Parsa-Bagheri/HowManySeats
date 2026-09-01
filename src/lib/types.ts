@@ -16,7 +16,7 @@ export type SortOption =
 
 export type Theatre = {
   id: string;
-  cineplexId?: string;
+  cineplexId: string;
   name: string;
   address?: string;
   city: string;
@@ -24,21 +24,18 @@ export type Theatre = {
   postalCode?: string;
   latitude?: number;
   longitude?: number;
-  amenities: string[];
-  isVip?: boolean;
 };
 
 export type Showtime = {
   id: string;
-  cineplexShowtimeId?: string;
+  cineplexShowtimeId: string;
   theatreId: string;
   movieTitle: string;
   startsAt: string;
-  format?: string;
+  format: string;
   auditorium?: string;
   purchaseUrl?: string;
   seatPreviewUrl: string;
-  accessibleServices?: string[];
 };
 
 export type SeatSnapshot = {
@@ -52,7 +49,6 @@ export type SeatSnapshot = {
   accessibilityCount: number;
   unknownCount: number;
   confidence: Confidence;
-  rawSnapshot: unknown;
 };
 
 export type SearchResult = {
@@ -86,12 +82,6 @@ export type SearchQuery = {
 };
 
 export type RawSeat = {
-  id?: string;
-  label?: string;
   status?: string;
   type?: string;
-  ariaLabel?: string;
-  className?: string;
-  disabled?: boolean;
-  selectable?: boolean;
 };

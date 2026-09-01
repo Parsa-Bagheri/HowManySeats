@@ -21,6 +21,8 @@ import type {
 const THEATRICAL_API_BASE = "https://apis.cineplex.com/prod/cpx/theatrical/api";
 const TICKETING_API_BASE = "https://apis.cineplex.com/prod/ticketing/api";
 const PUBLIC_SITE_KEY = "dcdac5601d864addbc2675a2e96cb1f8";
+const SEAT_CHECK_CONCURRENCY = 4;
+const MAX_SUGGESTION_THEATRES = 8;
 const CONFIDENCE_RANK: Record<SeatSnapshot["confidence"], number> = {
   high: 0,
   medium: 1,
@@ -38,7 +40,6 @@ type CineplexTheatresResponse = {
 type CineplexTheatre = {
   theatreId: number;
   theatreName: string;
-  isVIP?: boolean;
   location?: {
     geoLocation?: {
       latitude?: number;
@@ -49,8 +50,6 @@ type CineplexTheatre = {
     provinceCode?: string;
     postalCode?: string;
   };
-  amenities?: string[];
-  accessibilities?: string[];
 };
 
 type CineplexShowtimeResponse = Array<{
@@ -63,8 +62,6 @@ type CineplexMovieShowtime = {
   name: string;
   experiences?: Array<{
     experienceTypes?: string[];
-    isCcEnabled?: boolean;
-    isDsEnabled?: boolean;
     sessions?: CineplexSession[];
   }>;
 };
@@ -78,16 +75,13 @@ type CineplexSession = {
   isSoldOut?: boolean;
   isInThePast?: boolean;
   isReservedSeating?: boolean;
-  areaCode?: string;
   auditorium?: string;
 };
 
 type SeatLayoutArea = {
   rows?: Array<{
-    label?: string | null;
     seats?: Array<{
       id: string;
-      label?: string;
       type?: string;
     }>;
   }>;
@@ -133,34 +127,32 @@ export class CineplexClient {
 
   async search(query: SearchQuery): Promise<SearchResult[]> {
     const { origin, theatres } = await this.resolveSearchArea(query);
-    const searchDates = getSearchDates(
-      query.date,
-      query.endDate ?? query.date,
-    ) ?? [query.date];
+    const searchDates = getValidatedSearchDates(query);
     const maxTheatres = Number(
       process.env.CINEPLEX_MAX_THEATRES_PER_SEARCH ?? 5,
     );
     const maxSeatChecks = Number(
       process.env.CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH ?? 40,
     );
-    const candidatesByDate = new Map(
-      searchDates.map((date) => [date, [] as ShowtimeCandidate[]]),
-    );
+    const sortBy = query.sortBy ?? "distance-asc";
+    const candidateGroups: ShowtimeCandidate[][] = searchDates.map(() => []);
     const results: SearchResult[] = [];
 
-    for (const theatre of theatres.slice(0, maxTheatres)) {
-      const showtimesByDate = await Promise.all(
-        searchDates.map(async (date) => ({
-          date,
-          showtimes: await this.getShowtimes(theatre, date),
-        })),
-      );
+    const showtimeGroups = await Promise.all(
+      theatres.slice(0, maxTheatres).map(async (theatre) => ({
+        theatre,
+        showtimesByDate: await Promise.all(
+          searchDates.map((date) => this.getShowtimes(theatre, date)),
+        ),
+      })),
+    );
 
-      for (const { date, showtimes } of showtimesByDate) {
+    for (const { theatre, showtimesByDate } of showtimeGroups) {
+      for (const [dateIndex, showtimes] of showtimesByDate.entries()) {
         const matchingShowtimes = this.filterShowtimes(showtimes, query);
 
         for (const showtime of matchingShowtimes) {
-          candidatesByDate.get(date)?.push({
+          candidateGroups[dateIndex].push({
             theatre,
             showtime,
             distanceKm: getDistanceFromOrigin(origin, theatre),
@@ -169,34 +161,42 @@ export class CineplexClient {
       }
     }
 
-    const candidateGroups = searchDates.map((date) =>
-      sortShowtimeCandidates(
-        candidatesByDate.get(date) ?? [],
-        query.sortBy ?? "distance-asc",
-      ),
+    const sortedCandidateGroups = candidateGroups.map((candidates) =>
+      sortShowtimeCandidates(candidates, sortBy),
     );
 
-    for (const candidate of interleaveCandidates(candidateGroups).slice(
+    const candidates = interleaveCandidates(sortedCandidateGroups).slice(
       0,
       maxSeatChecks,
-    )) {
-      const snapshot = await this.getSeatSnapshot(
-        candidate.theatre,
-        candidate.showtime,
-      );
-      const result = {
-        theatre: candidate.theatre,
-        showtime: candidate.showtime,
-        snapshot,
-        distanceKm: candidate.distanceKm,
-      };
+    );
 
-      if (this.matchesSnapshotFilters(result, query)) {
-        results.push(result);
+    for (
+      let offset = 0;
+      offset < candidates.length;
+      offset += SEAT_CHECK_CONCURRENCY
+    ) {
+      const batch = await Promise.all(
+        candidates
+          .slice(offset, offset + SEAT_CHECK_CONCURRENCY)
+          .map(async (candidate) => ({
+            theatre: candidate.theatre,
+            showtime: candidate.showtime,
+            snapshot: await this.getSeatSnapshot(
+              candidate.theatre,
+              candidate.showtime,
+            ),
+            distanceKm: candidate.distanceKm,
+          })),
+      );
+
+      for (const result of batch) {
+        if (this.matchesSnapshotFilters(result, query)) {
+          results.push(result);
+        }
       }
     }
 
-    return sortResults(results, query.sortBy ?? "distance-asc");
+    return sortResults(results, sortBy);
   }
 
   async findTheatres(
@@ -217,17 +217,11 @@ export class CineplexClient {
       return [];
     }
 
-    const maxTheatres = Number(
-      process.env.CINEPLEX_MAX_THEATRES_PER_SUGGESTIONS ?? 8,
-    );
     const limit = query.limit ?? 8;
-    const searchDates = getSearchDates(
-      query.date,
-      query.endDate ?? query.date,
-    ) ?? [query.date];
+    const searchDates = getValidatedSearchDates(query);
     const theatres = await this.findTheatres(query);
     const showtimeGroups = await Promise.all(
-      theatres.slice(0, maxTheatres).map(async (theatre) => ({
+      theatres.slice(0, MAX_SUGGESTION_THEATRES).map(async (theatre) => ({
         theatre,
         showtimes: dedupeShowtimes(
           (
@@ -286,9 +280,7 @@ export class CineplexClient {
       ...(response.nearbyTheatres ?? []),
       ...(response.otherTheatres ?? []),
     ];
-    const theatres = rawTheatres
-      .map(toTheatre)
-      .filter((theatre) => Boolean(theatre.cineplexId));
+    const theatres = rawTheatres.map(toTheatre);
     const coordinates =
       query.latitude !== undefined && query.longitude !== undefined
         ? { latitude: query.latitude, longitude: query.longitude }
@@ -332,10 +324,6 @@ export class CineplexClient {
   }
 
   async getShowtimes(theatre: Theatre, date: string): Promise<Showtime[]> {
-    if (!theatre.cineplexId) {
-      return [];
-    }
-
     const url = `${THEATRICAL_API_BASE}/v1/showtimes?${new URLSearchParams({
       language: "en",
       locationId: theatre.cineplexId,
@@ -345,8 +333,8 @@ export class CineplexClient {
     const showtimes: Showtime[] = [];
 
     for (const theatreShowtimes of response) {
-      for (const showDate of theatreShowtimes.dates ?? []) {
-        for (const movie of showDate.movies ?? []) {
+      for (const showDate of theatreShowtimes.dates) {
+        for (const movie of showDate.movies) {
           for (const experience of movie.experiences ?? []) {
             for (const session of experience.sessions ?? []) {
               if (
@@ -362,7 +350,7 @@ export class CineplexClient {
               );
               const dbox = /D-BOX/i.test(format);
               showtimes.push({
-                id: `${theatre.cineplexId}-${session.vistaSessionId}-${session.areaCode ?? "area"}`,
+                id: `${theatre.cineplexId}-${session.vistaSessionId}`,
                 cineplexShowtimeId: String(session.vistaSessionId),
                 theatreId: theatre.id,
                 movieTitle: movie.name,
@@ -378,11 +366,6 @@ export class CineplexClient {
                   session,
                   dbox,
                 ),
-                accessibleServices: [
-                  ...(experience.isCcEnabled ? ["Closed captioning"] : []),
-                  ...(experience.isDsEnabled ? ["Described services"] : []),
-                  "Seat-map accessibility seats tracked separately",
-                ],
               });
             }
           }
@@ -397,10 +380,6 @@ export class CineplexClient {
     theatre: Theatre,
     showtime: Showtime,
   ): Promise<SeatSnapshot> {
-    if (!theatre.cineplexId || !showtime.cineplexShowtimeId) {
-      return buildSeatSnapshot(showtime.id, []);
-    }
-
     const [layout, availability] = await Promise.all([
       this.getJson<SeatLayout>(
         `${TICKETING_API_BASE}/v1/theatre/${theatre.cineplexId}/showtime/${showtime.cineplexShowtimeId}/seat-layout`,
@@ -457,7 +436,7 @@ export class CineplexClient {
         return false;
       }
 
-      if (query.nonVipOnly && /vip/i.test(showtime.format ?? "")) {
+      if (query.nonVipOnly && /vip/i.test(showtime.format)) {
         return false;
       }
 
@@ -489,6 +468,18 @@ export class CineplexClient {
       (!query.accessibleAvailable || result.snapshot.accessibilityCount > 0)
     );
   }
+}
+
+function getValidatedSearchDates(
+  query: Pick<SearchQuery, "date" | "endDate">,
+): string[] {
+  const dates = getSearchDates(query.date, query.endDate ?? query.date);
+
+  if (!dates) {
+    throw new Error("Search date range must contain one to three days.");
+  }
+
+  return dates;
 }
 
 function sortResults(
@@ -655,11 +646,6 @@ function toTheatre(theatre: CineplexTheatre): Theatre {
     postalCode: theatre.location?.postalCode,
     latitude: theatre.location?.geoLocation?.latitude,
     longitude: theatre.location?.geoLocation?.longitude,
-    amenities: [
-      ...(theatre.amenities ?? []),
-      ...(theatre.accessibilities ?? []),
-    ],
-    isVip: theatre.isVIP ?? /vip/i.test(theatre.theatreName),
   };
 }
 
@@ -790,16 +776,12 @@ function toRawSeats(
 
   if (availability.isPostShowtime) {
     return seats.map((seat) => ({
-      id: seat.id,
-      label: seat.label,
       type: seat.type,
       status: "unknown",
     }));
   }
 
   return seats.map((seat) => ({
-    id: seat.id,
-    label: seat.label,
     type: seat.type,
     status: availabilityBySeat[seat.id] ?? "Available",
   }));
@@ -807,7 +789,7 @@ function toRawSeats(
 
 function flattenSeats(
   layout: SeatLayout,
-): Array<{ id: string; label?: string; type?: string }> {
+): Array<{ id: string; type?: string }> {
   return [layout.standardSeats, layout.dboxSeats, layout.balconySeats].flatMap(
     (area) => (area?.rows ?? []).flatMap((row) => row.seats ?? []),
   );

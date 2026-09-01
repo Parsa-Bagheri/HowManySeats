@@ -23,7 +23,6 @@ async function main() {
     date: args.date ?? new Date().toISOString().slice(0, 10),
     radiusKm: args.radius ?? 25,
     movieTitle: args.movie,
-    maxFiveSold: false,
   });
 
   process.stdout.write(

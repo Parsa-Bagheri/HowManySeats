@@ -20,9 +20,9 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type SetStateAction,
+  memo,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -48,26 +48,20 @@ import {
 } from "@/lib/search-state";
 import type { MovieSuggestion, SearchResult, SortOption } from "@/lib/types";
 import {
-  parseUiMode,
   UI_MODE_COOKIE_NAME,
-  UI_MODE_STORAGE_KEY,
   type UiMode,
 } from "@/lib/ui-mode";
 
 type HomePageClientProps = {
-  hasInitialUiModeCookie: boolean;
   initialToday: string;
   initialUiMode: UiMode;
 };
 
-type SearchViewProps = {
-  activeFilterCount: number;
+type SearchFormProps = {
   date: string;
   endDate: string;
-  error: string | undefined;
   experienceTypes: ShowtimeExperienceType[];
   filters: SearchFilters;
-  hasSearched: boolean;
   loading: boolean;
   location: string;
   movieTitle: string;
@@ -80,7 +74,6 @@ type SearchViewProps = {
   onMovieSuggestionsClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   radiusKm: string;
-  results: SearchResult[];
   selectedDateIsToday: boolean;
   setFilters: Dispatch<SetStateAction<SearchFilters>>;
   setExperienceTypes: Dispatch<SetStateAction<ShowtimeExperienceType[]>>;
@@ -88,14 +81,22 @@ type SearchViewProps = {
   setMovieTitle: (value: string) => void;
   setRadiusKm: (value: string) => void;
   setSortBy: (value: SortOption) => void;
-  setUiMode: (mode: UiMode) => void;
-  showThemePrompt: boolean;
   sortBy: SortOption;
   today: string;
-  uiMode: UiMode;
-  onDismissThemePrompt: () => void;
   updateEndDate: (value: string) => void;
   updateStartDate: (value: string) => void;
+};
+
+type SearchViewProps = {
+  activeFilterCount: number;
+  error: string | undefined;
+  form: SearchFormProps;
+  hasSearched: boolean;
+  onDismissThemePrompt: () => void;
+  results: SearchResult[];
+  setUiMode: (mode: UiMode) => void;
+  showThemePrompt: boolean;
+  uiMode: UiMode;
 };
 
 type FilterOption = {
@@ -116,12 +117,12 @@ const FILTER_OPTIONS: FilterOption[] = [
   { key: "accessibleAvailable", label: "Accessible seating available" },
 ];
 
-const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
-  { value: "distance-asc", label: "Nearest distance first" },
-  { value: "distance-desc", label: "Farthest distance first" },
-  { value: "time-asc", label: "Earliest time first" },
-  { value: "time-desc", label: "Latest time first" },
-];
+const SORT_LABELS = {
+  "distance-asc": "Nearest distance first",
+  "distance-desc": "Farthest distance first",
+  "time-asc": "Earliest time first",
+  "time-desc": "Latest time first",
+} satisfies Record<SortOption, string>;
 
 const THEME_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -132,32 +133,18 @@ const funPanelShadow = "shadow-[12px_12px_0_#111111]";
 const funCardShadow = "shadow-[10px_10px_0_#111111]";
 
 export default function HomePageClient({
-  hasInitialUiModeCookie,
   initialToday,
   initialUiMode,
 }: HomePageClientProps) {
-  const initialState = useMemo(
-    () => makeDefaultSearchState(initialToday),
-    [initialToday],
-  );
   const [today, setToday] = useState(initialToday);
-  const [location, setLocation] = useState(initialState.location);
-  const [date, setDate] = useState(initialState.date);
-  const [endDate, setEndDate] = useState(initialState.endDate);
-  const [latitude, setLatitude] = useState(initialState.latitude);
-  const [longitude, setLongitude] = useState(initialState.longitude);
-  const [radiusKm, setRadiusKm] = useState(initialState.radiusKm);
-  const [movieTitle, setMovieTitle] = useState(initialState.movieTitle);
-  const [experienceTypes, setExperienceTypes] = useState<
-    ShowtimeExperienceType[]
-  >(initialState.experienceTypes);
+  const [searchState, setSearchState] = useState<SearchState>(() =>
+    makeDefaultSearchState(initialToday),
+  );
   const [movieSuggestions, setMovieSuggestions] = useState<MovieSuggestion[]>(
     [],
   );
   const [movieSuggestionsLoading, setMovieSuggestionsLoading] = useState(false);
   const [movieSuggestionsOpen, setMovieSuggestionsOpen] = useState(false);
-  const [sortBy, setSortBy] = useState<SortOption>(initialState.sortBy);
-  const [filters, setFilters] = useState<SearchFilters>(initialState.filters);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -168,7 +155,7 @@ export default function HomePageClient({
   const movieTitleFocused = useRef(false);
   const skipNextMovieSuggestionFetch = useRef(false);
 
-  const searchState: SearchState = {
+  const {
     location,
     date,
     endDate,
@@ -179,7 +166,7 @@ export default function HomePageClient({
     experienceTypes,
     sortBy,
     filters,
-  };
+  } = searchState;
   const selectedDateIsToday = date === today && endDate === today;
   const activeFilterCount =
     Object.values(getEffectiveFilters(searchState, today)).filter(Boolean)
@@ -194,17 +181,48 @@ export default function HomePageClient({
     setShowThemePrompt(false);
   }, []);
 
+  const setFilters = useCallback(
+    (action: SetStateAction<SearchFilters>) => {
+      setSearchState((current) => ({
+        ...current,
+        filters: resolveStateAction(action, current.filters),
+      }));
+    },
+    [],
+  );
+
+  const setExperienceTypes = useCallback(
+    (action: SetStateAction<ShowtimeExperienceType[]>) => {
+      setSearchState((current) => ({
+        ...current,
+        experienceTypes: resolveStateAction(action, current.experienceTypes),
+      }));
+    },
+    [],
+  );
+
+  const setRadiusKm = useCallback((radiusKm: string) => {
+    setSearchState((current) => ({ ...current, radiusKm }));
+  }, []);
+
+  const setSortBy = useCallback((sortBy: SortOption) => {
+    setSearchState((current) => ({ ...current, sortBy }));
+  }, []);
+
   const updateLocation = useCallback(
     (value: string, coordinates?: LocationCoordinates) => {
-      setLocation(value);
-      setLatitude(coordinates?.latitude);
-      setLongitude(coordinates?.longitude);
+      setSearchState((current) => ({
+        ...current,
+        location: value,
+        latitude: coordinates?.latitude,
+        longitude: coordinates?.longitude,
+      }));
     },
     [],
   );
 
   const updateMovieTitle = useCallback((value: string) => {
-    setMovieTitle(value);
+    setSearchState((current) => ({ ...current, movieTitle: value }));
     setMovieSuggestionsOpen(
       movieTitleFocused.current && value.trim().length >= 2,
     );
@@ -222,7 +240,7 @@ export default function HomePageClient({
 
   const onMovieSuggestionSelect = useCallback((title: string) => {
     skipNextMovieSuggestionFetch.current = true;
-    setMovieTitle(title);
+    setSearchState((current) => ({ ...current, movieTitle: title }));
     setMovieSuggestions([]);
     setMovieSuggestionsOpen(false);
     setMovieSuggestionsLoading(false);
@@ -237,18 +255,21 @@ export default function HomePageClient({
 
     try {
       const response = await fetch(`/api/search?${params.toString()}`);
-      const body = (await response.json()) as {
-        results?: SearchResult[];
-        error?: string;
-      };
+      const body = (await response.json()) as
+        | { results: SearchResult[] }
+        | { error: string };
 
-      if (!response.ok) {
+      if (!response.ok || !("results" in body)) {
         setResults([]);
-        setError(body.error ?? "Search is temporarily unavailable. Try again.");
+        setError(
+          "error" in body
+            ? body.error
+            : "Search is temporarily unavailable. Try again.",
+        );
         return;
       }
 
-      setResults(body.results ?? []);
+      setResults(body.results);
     } catch {
       setResults([]);
       setError(
@@ -263,16 +284,6 @@ export default function HomePageClient({
   const onMovieSuggestionsClose = useCallback(() => {
     setMovieSuggestionsOpen(false);
   }, []);
-
-  useEffect(() => {
-    const savedMode = readUiModePreference();
-    const nextMode = hasInitialUiModeCookie
-      ? initialUiMode
-      : (savedMode ?? initialUiMode);
-
-    setUiModeState(nextMode);
-    rememberUiModePreference(nextMode);
-  }, [hasInitialUiModeCookie, initialUiMode]);
 
   useEffect(() => {
     try {
@@ -300,26 +311,16 @@ export default function HomePageClient({
 
     if (!saved) {
       if (localToday !== initialToday) {
-        setDate(localToday);
-        setEndDate(addDays(localToday, 1));
+        setSearchState((current) => ({
+          ...current,
+          date: localToday,
+          endDate: addDays(localToday, 1),
+        }));
       }
       return;
     }
 
-    const state = normalizeSearchState(saved, localToday);
-    setLocation(state.location);
-    setDate(state.date);
-    setEndDate(state.endDate);
-    setLatitude(state.latitude);
-    setLongitude(state.longitude);
-    setRadiusKm(state.radiusKm);
-    setMovieTitle(state.movieTitle);
-    setExperienceTypes(state.experienceTypes);
-    setSortBy(state.sortBy);
-    setFilters(state.filters);
-    setHasSearched(false);
-    setResults([]);
-    setError(undefined);
+    setSearchState(normalizeSearchState(saved, localToday));
   }, [initialToday]);
 
   useEffect(() => {
@@ -362,10 +363,11 @@ export default function HomePageClient({
             signal: controller.signal,
           },
         );
-        const body = (await response.json()) as {
-          suggestions?: MovieSuggestion[];
-        };
-        const suggestions = response.ok ? (body.suggestions ?? []) : [];
+        const body = (await response.json()) as
+          | { suggestions: MovieSuggestion[] }
+          | { error: string };
+        const suggestions =
+          response.ok && "suggestions" in body ? body.suggestions : [];
 
         setMovieSuggestions(suggestions);
         setMovieSuggestionsOpen(
@@ -391,38 +393,51 @@ export default function HomePageClient({
     };
   }, [date, endDate, latitude, location, longitude, movieTitle, radiusKm]);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await executeSearch(searchState);
-  }
+  const onSubmit = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      await executeSearch(searchState);
+    },
+    [executeSearch, searchState],
+  );
 
-  function updateStartDate(value: string) {
-    const nextEndDate = value ? normalizeEndDate(value, endDate) : endDate;
-    setDate(value);
-    setEndDate(nextEndDate);
+  const updateStartDate = useCallback((value: string) => {
+    setSearchState((current) => {
+      const nextEndDate = normalizeEndDate(value, current.endDate);
+      const preserveTimeFilter = value === today && nextEndDate === today;
 
-    if (value !== today || nextEndDate !== today) {
-      setFilters((current) => ({ ...current, startsInNextTwoHours: false }));
-    }
-  }
+      return {
+        ...current,
+        date: value,
+        endDate: nextEndDate,
+        filters: preserveTimeFilter
+          ? current.filters
+          : { ...current.filters, startsInNextTwoHours: false },
+      };
+    });
+  }, [today]);
 
-  function updateEndDate(value: string) {
-    const nextEndDate = normalizeEndDate(date, value);
-    setEndDate(nextEndDate);
+  const updateEndDate = useCallback((value: string) => {
+    setSearchState((current) => {
+      const nextEndDate = normalizeEndDate(current.date, value);
+      const preserveTimeFilter =
+        current.date === today && nextEndDate === today;
 
-    if (date !== today || nextEndDate !== today) {
-      setFilters((current) => ({ ...current, startsInNextTwoHours: false }));
-    }
-  }
+      return {
+        ...current,
+        endDate: nextEndDate,
+        filters: preserveTimeFilter
+          ? current.filters
+          : { ...current.filters, startsInNextTwoHours: false },
+      };
+    });
+  }, [today]);
 
-  const viewProps: SearchViewProps = {
-    activeFilterCount,
+  const form: SearchFormProps = {
     date,
     endDate,
-    error,
     experienceTypes,
     filters,
-    hasSearched,
     loading,
     location,
     movieTitle,
@@ -435,7 +450,6 @@ export default function HomePageClient({
     onMovieSuggestionsClose,
     onSubmit,
     radiusKm,
-    results,
     selectedDateIsToday,
     setFilters,
     setExperienceTypes,
@@ -443,14 +457,21 @@ export default function HomePageClient({
     setMovieTitle: updateMovieTitle,
     setRadiusKm,
     setSortBy,
-    setUiMode,
-    showThemePrompt,
     sortBy,
     today,
-    uiMode,
-    onDismissThemePrompt: dismissThemePrompt,
     updateEndDate,
     updateStartDate,
+  };
+  const viewProps: SearchViewProps = {
+    activeFilterCount,
+    error,
+    form,
+    hasSearched,
+    onDismissThemePrompt: dismissThemePrompt,
+    results,
+    setUiMode,
+    showThemePrompt,
+    uiMode,
   };
 
   return uiMode === "fun" ? (
@@ -461,61 +482,22 @@ export default function HomePageClient({
 }
 
 function rememberUiModePreference(mode: UiMode) {
-  try {
-    window.localStorage.setItem(UI_MODE_STORAGE_KEY, mode);
-  } catch {
-    // The cookie still preserves the preference when browser storage is unavailable.
-  }
-
   document.cookie = `${UI_MODE_COOKIE_NAME}=${mode}; Path=/; Max-Age=${UI_MODE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
-  document.documentElement.removeAttribute("data-ui-mode-pending");
 }
 
-function readUiModePreference(): UiMode | undefined {
-  try {
-    return parseUiMode(window.localStorage.getItem(UI_MODE_STORAGE_KEY));
-  } catch {
-    return undefined;
-  }
-}
-
-function CleanHomeView({
-  activeFilterCount,
-  date,
-  endDate,
-  error,
-  experienceTypes,
-  filters,
-  hasSearched,
-  loading,
-  location,
-  movieTitle,
-  movieSuggestions,
-  movieSuggestionsLoading,
-  movieSuggestionsOpen,
-  onMovieTitleBlur,
-  onMovieTitleFocus,
-  onMovieSuggestionSelect,
-  onMovieSuggestionsClose,
-  onSubmit,
-  radiusKm,
-  results,
-  selectedDateIsToday,
-  setFilters,
-  setExperienceTypes,
-  setLocation,
-  setMovieTitle,
-  setRadiusKm,
-  setSortBy,
-  setUiMode,
-  showThemePrompt,
-  sortBy,
-  today,
-  uiMode,
-  onDismissThemePrompt,
-  updateEndDate,
-  updateStartDate,
-}: SearchViewProps) {
+function CleanHomeView(props: SearchViewProps) {
+  const {
+    activeFilterCount,
+    error,
+    form,
+    hasSearched,
+    results,
+    setUiMode,
+    showThemePrompt,
+    uiMode,
+    onDismissThemePrompt,
+  } = props;
+  const { date, endDate, loading, location, sortBy } = form;
   return (
     <main className="flex min-h-screen flex-col bg-[#050505] px-4 py-5 text-neutral-100 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-5">
@@ -538,90 +520,7 @@ function CleanHomeView({
 
         <div className="grid w-full flex-1 gap-5 lg:grid-cols-[380px_1fr]">
           <section className="rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_18px_70px_rgba(0,0,0,0.45)]">
-            <form className="grid gap-4" onSubmit={onSubmit}>
-              <AddressField
-                mode="clean"
-                value={location}
-                onChange={setLocation}
-              />
-
-              <DateRangeFields
-                date={date}
-                endDate={endDate}
-                mode="clean"
-                today={today}
-                updateEndDate={updateEndDate}
-                updateStartDate={updateStartDate}
-              />
-
-              <label className="grid gap-1.5 text-sm font-medium text-neutral-200">
-                Radius
-                <select
-                  className="focus-ring h-10 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white"
-                  value={radiusKm}
-                  onChange={(event) => setRadiusKm(event.target.value)}
-                >
-                  <option value="10">10 km</option>
-                  <option value="25">25 km</option>
-                  <option value="50">50 km</option>
-                  <option value="100">100 km</option>
-                </select>
-              </label>
-
-              <label className="grid gap-1.5 text-sm font-medium text-neutral-200">
-                Sort by
-                <select
-                  className="focus-ring h-10 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white"
-                  value={sortBy}
-                  onChange={(event) =>
-                    setSortBy(event.target.value as SortOption)
-                  }
-                >
-                  {SORT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <MovieTitleField
-                mode="clean"
-                value={movieTitle}
-                suggestions={movieSuggestions}
-                suggestionsLoading={movieSuggestionsLoading}
-                suggestionsOpen={movieSuggestionsOpen}
-                onBlur={onMovieTitleBlur}
-                onChange={setMovieTitle}
-                onFocus={onMovieTitleFocus}
-                onRequestClose={onMovieSuggestionsClose}
-                onSelect={onMovieSuggestionSelect}
-              />
-
-              <TheatreTypeField
-                mode="clean"
-                selectedTypes={experienceTypes}
-                setSelectedTypes={setExperienceTypes}
-              />
-
-              <fieldset className="grid gap-2 rounded-md border border-neutral-800 bg-[#151515] p-3">
-                <legend className="flex items-center gap-2 px-1 text-sm font-semibold text-neutral-100">
-                  <Filter
-                    className="h-4 w-4 text-amber-300"
-                    aria-hidden="true"
-                  />
-                  Filters
-                </legend>
-                <FilterControls
-                  filters={filters}
-                  mode="clean"
-                  selectedDateIsToday={selectedDateIsToday}
-                  setFilters={setFilters}
-                />
-              </fieldset>
-
-              <SearchButton loading={loading} mode="clean" />
-            </form>
+            <SearchForm mode="clean" {...form} />
           </section>
 
           <section className="grid content-start gap-3">
@@ -669,11 +568,7 @@ function CleanHomeView({
               </div>
             ) : null}
 
-            <div className="grid gap-3">
-              {results.map((result) => (
-                <CleanResultCard key={result.showtime.id} result={result} />
-              ))}
-            </div>
+            <CleanResultList results={results} />
           </section>
         </div>
       </div>
@@ -685,43 +580,19 @@ function CleanHomeView({
   );
 }
 
-function FunHomeView({
-  activeFilterCount,
-  date,
-  endDate,
-  error,
-  experienceTypes,
-  filters,
-  hasSearched,
-  loading,
-  location,
-  movieTitle,
-  movieSuggestions,
-  movieSuggestionsLoading,
-  movieSuggestionsOpen,
-  onMovieTitleBlur,
-  onMovieTitleFocus,
-  onMovieSuggestionSelect,
-  onMovieSuggestionsClose,
-  onSubmit,
-  radiusKm,
-  results,
-  selectedDateIsToday,
-  setFilters,
-  setExperienceTypes,
-  setLocation,
-  setMovieTitle,
-  setRadiusKm,
-  setSortBy,
-  setUiMode,
-  showThemePrompt,
-  sortBy,
-  today,
-  uiMode,
-  onDismissThemePrompt,
-  updateEndDate,
-  updateStartDate,
-}: SearchViewProps) {
+function FunHomeView(props: SearchViewProps) {
+  const {
+    activeFilterCount,
+    error,
+    form,
+    hasSearched,
+    results,
+    setUiMode,
+    showThemePrompt,
+    uiMode,
+    onDismissThemePrompt,
+  } = props;
+  const { date, endDate, loading, location, radiusKm, sortBy } = form;
   return (
     <main className="chaos-stage min-h-screen overflow-hidden px-3 py-4 text-black sm:px-5 lg:px-8">
       <div className="relative z-10 mx-auto flex w-full max-w-[1500px] flex-col gap-5">
@@ -798,87 +669,7 @@ function FunHomeView({
               </h2>
             </div>
 
-            <form className="grid gap-4" onSubmit={onSubmit}>
-              <AddressField
-                mode="fun"
-                value={location}
-                onChange={setLocation}
-              />
-
-              <DateRangeFields
-                date={date}
-                endDate={endDate}
-                mode="fun"
-                today={today}
-                updateEndDate={updateEndDate}
-                updateStartDate={updateStartDate}
-              />
-
-              <label className="grid gap-2 text-sm font-black uppercase">
-                Radius
-                <select
-                  className={funInputClass}
-                  value={radiusKm}
-                  onChange={(event) => setRadiusKm(event.target.value)}
-                >
-                  <option value="10">10 km</option>
-                  <option value="25">25 km</option>
-                  <option value="50">50 km</option>
-                  <option value="100">100 km</option>
-                </select>
-              </label>
-
-              <label className="grid gap-2 text-sm font-black uppercase">
-                Sort by
-                <select
-                  className={funInputClass}
-                  value={sortBy}
-                  onChange={(event) =>
-                    setSortBy(event.target.value as SortOption)
-                  }
-                >
-                  {SORT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <MovieTitleField
-                mode="fun"
-                value={movieTitle}
-                suggestions={movieSuggestions}
-                suggestionsLoading={movieSuggestionsLoading}
-                suggestionsOpen={movieSuggestionsOpen}
-                onBlur={onMovieTitleBlur}
-                onChange={setMovieTitle}
-                onFocus={onMovieTitleFocus}
-                onRequestClose={onMovieSuggestionsClose}
-                onSelect={onMovieSuggestionSelect}
-              />
-
-              <TheatreTypeField
-                mode="fun"
-                selectedTypes={experienceTypes}
-                setSelectedTypes={setExperienceTypes}
-              />
-
-              <fieldset className="grid gap-3 border-[6px] border-black bg-[#ff4fa3] p-3 shadow-[8px_8px_0_#111111]">
-                <legend className="ml-2 flex -rotate-2 items-center gap-2 border-4 border-black bg-[#f7e900] px-3 py-1 text-sm font-black uppercase shadow-[5px_5px_0_#111111]">
-                  <Filter className="h-4 w-4" aria-hidden="true" />
-                  Filters
-                </legend>
-                <FilterControls
-                  filters={filters}
-                  mode="fun"
-                  selectedDateIsToday={selectedDateIsToday}
-                  setFilters={setFilters}
-                />
-              </fieldset>
-
-              <SearchButton loading={loading} mode="fun" />
-            </form>
+            <SearchForm mode="fun" {...form} />
           </section>
 
           <section className="grid content-start gap-5">
@@ -953,11 +744,7 @@ function FunHomeView({
               </div>
             ) : null}
 
-            <div className="grid gap-5">
-              {results.map((result) => (
-                <FunResultCard key={result.showtime.id} result={result} />
-              ))}
-            </div>
+            <FunResultList results={results} />
           </section>
         </div>
         <footer className="grid gap-2 border-[6px] border-black bg-[#00e676] px-4 py-4 text-center text-sm font-black uppercase tracking-[0.16em] shadow-[10px_10px_0_#111111] sm:-rotate-[0.35deg]">
@@ -972,6 +759,132 @@ function FunHomeView({
     </main>
   );
 }
+
+const SearchForm = memo(function SearchForm({
+  date,
+  endDate,
+  experienceTypes,
+  filters,
+  loading,
+  location,
+  mode,
+  movieTitle,
+  movieSuggestions,
+  movieSuggestionsLoading,
+  movieSuggestionsOpen,
+  onMovieTitleBlur,
+  onMovieTitleFocus,
+  onMovieSuggestionSelect,
+  onMovieSuggestionsClose,
+  onSubmit,
+  radiusKm,
+  selectedDateIsToday,
+  setFilters,
+  setExperienceTypes,
+  setLocation,
+  setMovieTitle,
+  setRadiusKm,
+  setSortBy,
+  sortBy,
+  today,
+  updateEndDate,
+  updateStartDate,
+}: SearchFormProps & { mode: UiMode }) {
+  const isFun = mode === "fun";
+  const selectLabelClass = isFun
+    ? "grid gap-2 text-sm font-black uppercase"
+    : "grid gap-1.5 text-sm font-medium text-neutral-200";
+  const selectClass = isFun
+    ? funInputClass
+    : "focus-ring h-10 rounded-md border border-neutral-700 bg-[#1b1b1b] px-3 text-base text-white";
+  const fieldsetClass = isFun
+    ? "grid gap-3 border-[6px] border-black bg-[#ff4fa3] p-3 shadow-[8px_8px_0_#111111]"
+    : "grid gap-2 rounded-md border border-neutral-800 bg-[#151515] p-3";
+  const legendClass = isFun
+    ? "ml-2 flex -rotate-2 items-center gap-2 border-4 border-black bg-[#f7e900] px-3 py-1 text-sm font-black uppercase shadow-[5px_5px_0_#111111]"
+    : "flex items-center gap-2 px-1 text-sm font-semibold text-neutral-100";
+
+  return (
+    <form className="grid gap-4" onSubmit={onSubmit}>
+      <AddressField mode={mode} value={location} onChange={setLocation} />
+
+      <DateRangeFields
+        date={date}
+        endDate={endDate}
+        mode={mode}
+        today={today}
+        updateEndDate={updateEndDate}
+        updateStartDate={updateStartDate}
+      />
+
+      <label className={selectLabelClass}>
+        Radius
+        <select
+          className={selectClass}
+          value={radiusKm}
+          onChange={(event) => setRadiusKm(event.target.value)}
+        >
+          <option value="10">10 km</option>
+          <option value="25">25 km</option>
+          <option value="50">50 km</option>
+          <option value="100">100 km</option>
+        </select>
+      </label>
+
+      <label className={selectLabelClass}>
+        Sort by
+        <select
+          className={selectClass}
+          value={sortBy}
+          onChange={(event) => setSortBy(event.target.value as SortOption)}
+        >
+          {Object.entries(SORT_LABELS).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <MovieTitleField
+        mode={mode}
+        value={movieTitle}
+        suggestions={movieSuggestions}
+        suggestionsLoading={movieSuggestionsLoading}
+        suggestionsOpen={movieSuggestionsOpen}
+        onBlur={onMovieTitleBlur}
+        onChange={setMovieTitle}
+        onFocus={onMovieTitleFocus}
+        onRequestClose={onMovieSuggestionsClose}
+        onSelect={onMovieSuggestionSelect}
+      />
+
+      <TheatreTypeField
+        mode={mode}
+        selectedTypes={experienceTypes}
+        setSelectedTypes={setExperienceTypes}
+      />
+
+      <fieldset className={fieldsetClass}>
+        <legend className={legendClass}>
+          <Filter
+            className={isFun ? "h-4 w-4" : "h-4 w-4 text-amber-300"}
+            aria-hidden="true"
+          />
+          Filters
+        </legend>
+        <FilterControls
+          filters={filters}
+          mode={mode}
+          selectedDateIsToday={selectedDateIsToday}
+          setFilters={setFilters}
+        />
+      </fieldset>
+
+      <SearchButton loading={loading} mode={mode} />
+    </form>
+  );
+});
 
 function DateRangeFields({
   date,
@@ -1185,17 +1098,6 @@ function ModeSwitch({
   if (isFun) {
     return (
       <span className="fun-switch-flames">
-        {[
-          "fun-fire-top-left",
-          "fun-fire-top-center",
-          "fun-fire-top-right",
-          "fun-fire-bottom-left",
-          "fun-fire-bottom-right",
-          "fun-fire-left",
-          "fun-fire-right",
-        ].map((position) => (
-          <FireSticker className={position} key={position} />
-        ))}
         <button
           className="focus-ring relative z-10 inline-flex min-h-12 items-center gap-3 border-4 border-black bg-white p-1 text-xs font-black uppercase text-black shadow-[5px_5px_0_#111111] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[7px_7px_0_#111111]"
           type="button"
@@ -1251,19 +1153,6 @@ function ModeSwitch({
         />
       </span>
     </button>
-  );
-}
-
-function FireSticker({ className }: { className: string }) {
-  return (
-    <span className={`fun-fire-sticker ${className}`} aria-hidden="true">
-      <iframe
-        src="https://tenor.com/embed/14295562"
-        title="Decorative animated fire"
-        loading="lazy"
-        tabIndex={-1}
-      />
-    </span>
   );
 }
 
@@ -1533,7 +1422,7 @@ function FilterControls({
       disabled: option.todayOnly && !selectedDateIsToday,
       label: option.label,
       onChange: (value: boolean) =>
-        setFilters((current) => setFilterValue(current, option.key, value)),
+        setFilters((current) => ({ ...current, [option.key]: value })),
     };
 
     return mode === "fun" ? (
@@ -1577,7 +1466,7 @@ function CleanResultCard({ result }: { result: SearchResult }) {
   const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString()}`;
 
   return (
-    <article className="rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_14px_44px_rgba(0,0,0,0.28)]">
+    <article className="result-card rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_14px_44px_rgba(0,0,0,0.28)]">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-800 pb-3">
         <div>
           <h2 className="text-lg font-semibold text-white">
@@ -1657,6 +1546,20 @@ function CleanResultCard({ result }: { result: SearchResult }) {
     </article>
   );
 }
+
+const CleanResultList = memo(function CleanResultList({
+  results,
+}: {
+  results: SearchResult[];
+}) {
+  return (
+    <div className="grid gap-3">
+      {results.map((result) => (
+        <CleanResultCard key={result.showtime.id} result={result} />
+      ))}
+    </div>
+  );
+});
 
 function MarqueeStrip() {
   const chunks = [
@@ -1774,7 +1677,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
 
   return (
     <article
-      className={`chaos-card relative border-[6px] border-black bg-white ${funCardShadow}`}
+      className={`result-card chaos-card relative border-[6px] border-black bg-white ${funCardShadow}`}
     >
       <div className="chaos-card-head grid gap-3 border-b-[6px] border-black p-4 lg:grid-cols-[1fr_auto]">
         <div className="min-w-0">
@@ -1880,6 +1783,20 @@ function FunResultCard({ result }: { result: SearchResult }) {
   );
 }
 
+const FunResultList = memo(function FunResultList({
+  results,
+}: {
+  results: SearchResult[];
+}) {
+  return (
+    <div className="grid gap-5">
+      {results.map((result) => (
+        <FunResultCard key={result.showtime.id} result={result} />
+      ))}
+    </div>
+  );
+});
+
 function MetricSlab({
   label,
   value,
@@ -1911,19 +1828,8 @@ function isFilterChecked(
     : filters[option.key];
 }
 
-function setFilterValue(
-  filters: SearchFilters,
-  key: keyof SearchFilters,
-  value: boolean,
-): SearchFilters {
-  return { ...filters, [key]: value };
-}
-
 function sortLabel(sortBy: SortOption): string {
-  return (
-    SORT_OPTIONS.find((option) => option.value === sortBy)?.label ??
-    "Nearest distance first"
-  );
+  return SORT_LABELS[sortBy];
 }
 
 function resultCount(results: SearchResult[], loading: boolean): string {
@@ -1940,4 +1846,10 @@ function relativeMinutes(date: Date): number {
     0,
     Math.round((now.getTime() - date.getTime()) / 60000),
   );
+}
+
+function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
+  return typeof action === "function"
+    ? (action as (value: T) => T)(current)
+    : action;
 }

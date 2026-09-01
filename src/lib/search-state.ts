@@ -74,10 +74,13 @@ export function buildSearchParams(state: SearchState): URLSearchParams {
     endDate: state.endDate,
     radiusKm: state.radiusKm,
     sortBy: state.sortBy,
-    ...Object.fromEntries(
-      Object.entries(filters).map(([key, value]) => [key, String(value)]),
-    ),
   });
+
+  for (const [key, enabled] of Object.entries(filters)) {
+    if (enabled) {
+      params.set(key, "true");
+    }
+  }
 
   if (state.movieTitle.trim()) {
     params.set("movieTitle", state.movieTitle.trim());

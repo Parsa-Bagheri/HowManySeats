@@ -33,5 +33,5 @@ test("matches Cineplex VIP variants and leaves an empty selection unfiltered", (
     showtimeMatchesExperienceTypes("VIP 19+, Recliner", ["VIP"]),
     true,
   );
-  assert.equal(showtimeMatchesExperienceTypes(undefined, []), true);
+  assert.equal(showtimeMatchesExperienceTypes("Regular", []), true);
 });

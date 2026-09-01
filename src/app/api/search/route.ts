@@ -7,7 +7,6 @@ import {
   searchParamsToRecord,
   validateSearchArea,
 } from "@/lib/search-request";
-import type { SearchResult } from "@/lib/types";
 
 const booleanParam = z
   .enum(["true", "false"])
@@ -62,7 +61,7 @@ export async function GET(request: Request) {
       endDate: parsed.data.endDate ?? parsed.data.date,
     });
 
-    return NextResponse.json({ results: results.map(toUiResult) });
+    return NextResponse.json({ results });
   } catch (error) {
     console.error("Cineplex search request failed", error);
 
@@ -73,27 +72,4 @@ export async function GET(request: Request) {
       { status: 502 },
     );
   }
-}
-
-function toUiResult(result: SearchResult): SearchResult {
-  return {
-    ...result,
-    snapshot: {
-      ...result.snapshot,
-      rawSnapshot: summarizeRawSnapshot(result.snapshot.rawSnapshot),
-    },
-  };
-}
-
-function summarizeRawSnapshot(rawSnapshot: unknown) {
-  if (
-    rawSnapshot &&
-    typeof rawSnapshot === "object" &&
-    "counts" in rawSnapshot &&
-    typeof rawSnapshot.counts === "object"
-  ) {
-    return { counts: rawSnapshot.counts };
-  }
-
-  return undefined;
 }

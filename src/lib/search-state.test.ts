@@ -48,12 +48,6 @@ test("disables the next-two-hours filter for a multi-day range", () => {
   assert.equal(getEffectiveFilters(state, TODAY).startsInNextTwoHours, false);
 });
 
-test("old URLs no longer imply the five-or-fewer filter", () => {
-  const parsed = readSearchStateFromUrl(`?location=Toronto&date=${TODAY}`);
-
-  assert.equal(parsed?.filters?.maxFiveSold, false);
-});
-
 test("replaces an invalid URL date with today's date", () => {
   const parsed = readSearchStateFromUrl("?location=Toronto&date=not-a-date");
   const normalized = normalizeSearchState(parsed ?? {}, TODAY);

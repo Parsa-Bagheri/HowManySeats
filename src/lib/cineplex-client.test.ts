@@ -86,7 +86,6 @@ test("maps purchase and preview links from Cineplex showtimes", async (t) => {
       name: "Example Theatre",
       city: "Example City",
       province: "ON",
-      amenities: [],
     },
     "2026-08-31",
   );
@@ -98,4 +97,88 @@ test("maps purchase and preview links from Cineplex showtimes", async (t) => {
     showtimes[1]?.seatPreviewUrl,
     "https://www.cineplex.com/en-Mobile/ticketing/preview?theatreId=7402&showtimeId=454783&dbox=False",
   );
+});
+
+test("checks seat maps in bounded parallel batches", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let activeSeatRequests = 0;
+  let peakSeatRequests = 0;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url.includes("/v1/theatres?")) {
+      return Response.json({
+        nearbyTheatres: [
+          {
+            theatreId: 7402,
+            theatreName: "Example Theatre",
+            location: {
+              city: "Toronto",
+              provinceCode: "ON",
+              geoLocation: { latitude: 43.65, longitude: -79.38 },
+            },
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/v1/showtimes?")) {
+      return Response.json([
+        {
+          dates: [
+            {
+              movies: [
+                {
+                  name: "Example Movie",
+                  experiences: [
+                    {
+                      experienceTypes: ["Regular"],
+                      sessions: Array.from({ length: 5 }, (_, index) => ({
+                        vistaSessionId: 1000 + index,
+                        showStartDateTime: `2026-09-01T${10 + index}:00:00`,
+                        isReservedSeating: true,
+                      })),
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    }
+
+    if (url.includes("/seat-layout") || url.includes("/seat-availability")) {
+      activeSeatRequests += 1;
+      peakSeatRequests = Math.max(peakSeatRequests, activeSeatRequests);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      activeSeatRequests -= 1;
+
+      return url.includes("/seat-layout")
+        ? Response.json({
+            standardSeats: {
+              rows: [{ seats: [{ id: "A1", type: "Standard" }] }],
+            },
+          })
+        : Response.json({ seatAvailabilities: { A1: "Available" } });
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  const client = new CineplexClient("test-key");
+  const results = await client.search({
+    location: "Toronto",
+    date: "2026-09-01",
+    radiusKm: 25,
+    latitude: 43.65,
+    longitude: -79.38,
+  });
+
+  assert.equal(results.length, 5);
+  assert.equal(peakSeatRequests, 8);
 });

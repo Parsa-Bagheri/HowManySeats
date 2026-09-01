@@ -10,7 +10,6 @@ export default async function HomePage() {
 
   return (
     <HomePageClient
-      hasInitialUiModeCookie={Boolean(cookieMode)}
       initialToday={initialToday}
       initialUiMode={cookieMode ?? "clean"}
     />

@@ -1,6 +1,5 @@
 "use client";
 
-import Script from "next/script";
 import { useEffect, useRef, useState } from "react";
 import type { UiMode } from "@/lib/ui-mode";
 
@@ -50,16 +49,74 @@ type GooglePlacesLibrary = {
 };
 
 type GoogleMapsWindow = Window & {
+  __howManySeatsGoogleMapsReady?: () => void;
   google?: {
     maps?: {
-      importLibrary: (library: string) => Promise<unknown>;
+      places?: GooglePlacesLibrary;
     };
   };
 };
 
 const FIELD_LABEL = "Address, Postal Code, and City";
 const FIELD_LABEL_ID = "location-search-label";
+const GOOGLE_MAPS_CALLBACK = "__howManySeatsGoogleMapsReady";
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY?.trim();
+let googlePlacesPromise: Promise<GooglePlacesLibrary> | undefined;
+
+function getGooglePlacesLibrary(): GooglePlacesLibrary | undefined {
+  return (window as GoogleMapsWindow).google?.maps?.places;
+}
+
+function loadGooglePlacesLibrary(apiKey: string): Promise<GooglePlacesLibrary> {
+  const loadedLibrary = getGooglePlacesLibrary();
+
+  if (loadedLibrary?.PlaceAutocompleteElement) {
+    return Promise.resolve(loadedLibrary);
+  }
+
+  if (googlePlacesPromise) {
+    return googlePlacesPromise;
+  }
+
+  googlePlacesPromise = new Promise((resolve, reject) => {
+    const mapsWindow = window as GoogleMapsWindow;
+    const script = document.createElement("script");
+    const params = new URLSearchParams({
+      key: apiKey,
+      libraries: "places",
+      v: "weekly",
+      loading: "async",
+      auth_referrer_policy: "origin",
+      callback: GOOGLE_MAPS_CALLBACK,
+    });
+
+    const fail = (message: string) => {
+      delete mapsWindow.__howManySeatsGoogleMapsReady;
+      googlePlacesPromise = undefined;
+      script.remove();
+      reject(new Error(message));
+    };
+
+    mapsWindow.__howManySeatsGoogleMapsReady = () => {
+      const library = getGooglePlacesLibrary();
+
+      if (!library?.PlaceAutocompleteElement) {
+        fail("Google Maps Places failed to initialize");
+        return;
+      }
+
+      delete mapsWindow.__howManySeatsGoogleMapsReady;
+      resolve(library);
+    };
+
+    script.async = true;
+    script.src = `https://maps.googleapis.com/maps/api/js?${params}`;
+    script.onerror = () => fail("Google Maps JavaScript failed to load");
+    document.head.append(script);
+  });
+
+  return googlePlacesPromise;
+}
 
 export default function AddressField({
   mode,
@@ -83,9 +140,31 @@ export default function AddressField({
   const helperClass = isFun
     ? "text-[0.65rem] font-black uppercase tracking-[0.1em]"
     : "text-xs text-neutral-500";
-  const mapsScriptUrl = GOOGLE_MAPS_API_KEY
-    ? `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&libraries=places&v=weekly&auth_referrer_policy=origin`
-    : undefined;
+
+  useEffect(() => {
+    if (!GOOGLE_MAPS_API_KEY) {
+      return;
+    }
+
+    let disposed = false;
+
+    void loadGooglePlacesLibrary(GOOGLE_MAPS_API_KEY)
+      .then(() => {
+        if (!disposed) {
+          setMapsReady(true);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!disposed) {
+          console.error("Google Maps autocomplete failed to load.", error);
+          setMapsFailed(true);
+        }
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!mapsReady || mapsFailed || !containerRef.current) {
@@ -95,18 +174,15 @@ export default function AddressField({
     let disposed = false;
     let autocomplete: GooglePlaceAutocompleteElement | undefined;
 
-    async function initializeAutocomplete() {
+    function initializeAutocomplete() {
       try {
-        const maps = (window as GoogleMapsWindow).google?.maps;
+        const places = getGooglePlacesLibrary();
 
-        if (!maps) {
+        if (!places?.PlaceAutocompleteElement) {
           throw new Error("Google Maps failed to initialize");
         }
 
-        const { PlaceAutocompleteElement } = (await maps.importLibrary(
-          "places",
-        )) as GooglePlacesLibrary;
-        autocomplete = new PlaceAutocompleteElement({
+        autocomplete = new places.PlaceAutocompleteElement({
           includedRegionCodes: ["ca"],
           value: valueRef.current,
         });
@@ -114,7 +190,6 @@ export default function AddressField({
         autocomplete.description = FIELD_LABEL;
         autocomplete.placeholder =
           "Enter a Canadian address, postal code, or city";
-        autocomplete.includedRegionCodes = ["ca"];
         autocomplete.requestedLanguage = "en-CA";
         autocomplete.requestedRegion = "ca";
         autocomplete.setAttribute("aria-labelledby", FIELD_LABEL_ID);
@@ -186,7 +261,7 @@ export default function AddressField({
       }
     }
 
-    void initializeAutocomplete();
+    initializeAutocomplete();
 
     return () => {
       disposed = true;
@@ -235,19 +310,6 @@ export default function AddressField({
               ? "Address suggestions from Google Maps"
               : "Loading address suggestions from Google Maps"}
         </span>
-      ) : null}
-      {mapsScriptUrl ? (
-        <Script
-          id="google-maps-places"
-          src={mapsScriptUrl}
-          strategy="afterInteractive"
-          onLoad={() => setMapsReady(true)}
-          onReady={() => setMapsReady(true)}
-          onError={(error) => {
-            console.error("Google Maps JavaScript failed to load.", error);
-            setMapsFailed(true);
-          }}
-        />
       ) : null}
     </div>
   );

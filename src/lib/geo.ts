@@ -3,10 +3,6 @@ export type Coordinates = {
   longitude: number;
 };
 
-type KnownLocation = Coordinates & {
-  match: RegExp;
-};
-
 type NominatimResult = {
   lat?: string;
   lon?: string;
@@ -17,28 +13,6 @@ type ZippopotamusResult = {
     latitude?: string;
     longitude?: string;
   }>;
-};
-
-const KNOWN_LOCATIONS: KnownLocation[] = [
-  {
-    match: /\b(toronto|yonge|dundas)\b/i,
-    latitude: 43.6532,
-    longitude: -79.3832,
-  },
-  { match: /\bwaterloo\b/i, latitude: 43.4643, longitude: -80.5204 },
-  { match: /\bkitchener\b/i, latitude: 43.4516, longitude: -80.4925 },
-  { match: /\bcambridge\b/i, latitude: 43.3616, longitude: -80.3144 },
-  { match: /\bottawa\b/i, latitude: 45.4215, longitude: -75.6972 },
-  { match: /\bvancouver\b/i, latitude: 49.2827, longitude: -123.1207 },
-  { match: /\bsurrey\b/i, latitude: 49.1044, longitude: -122.8011 },
-  { match: /\bcalgary\b/i, latitude: 51.0447, longitude: -114.0719 },
-  { match: /\bmontreal\b/i, latitude: 45.5019, longitude: -73.5674 },
-];
-
-const FSA_FALLBACKS: Record<string, Coordinates> = {
-  M5V: { latitude: 43.6426, longitude: -79.3871 },
-  N2L: { latitude: 43.4731, longitude: -80.537 },
-  V3Z: { latitude: 49.0539, longitude: -122.7845 },
 };
 
 const PROVINCE_CODES: Record<string, string> = {
@@ -87,12 +61,10 @@ export async function resolveLocation(
     return geocodeCache.get(cacheKey);
   }
 
-  const fallback = resolveKnownLocation(normalized);
   const coordinates = isCanadianPostalInput(normalized)
     ? ((await geocodeCanadianLocation(normalized)) ??
-      (await geocodeCanadianPostalArea(normalized)) ??
-      fallback)
-    : (fallback ?? (await geocodeCanadianLocation(normalized)));
+      (await geocodeCanadianPostalArea(normalized)))
+    : await geocodeCanadianLocation(normalized);
 
   geocodeCache.set(cacheKey, coordinates);
   return coordinates;
@@ -100,18 +72,6 @@ export async function resolveLocation(
 
 export function getProvinceCode(input: string): string | undefined {
   return PROVINCE_CODES[normalizeLocationInput(input).toLowerCase()];
-}
-
-function resolveKnownLocation(input: string): Coordinates | undefined {
-  const normalized = normalizeLocationInput(input);
-  const fsa = extractForwardSortationArea(normalized);
-  const location = KNOWN_LOCATIONS.find((item) => item.match.test(normalized));
-
-  if (location) {
-    return { latitude: location.latitude, longitude: location.longitude };
-  }
-
-  return fsa ? FSA_FALLBACKS[fsa] : undefined;
 }
 
 export function distanceKm(a: Coordinates, b: Coordinates): number {

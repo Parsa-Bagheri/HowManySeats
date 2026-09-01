@@ -45,7 +45,7 @@ export function parseShowtimeExperienceTypes(
 }
 
 export function showtimeMatchesExperienceTypes(
-  format: string | undefined,
+  format: string,
   selectedTypes: readonly ShowtimeExperienceType[],
 ): boolean {
   if (!selectedTypes.length) {
@@ -53,7 +53,7 @@ export function showtimeMatchesExperienceTypes(
   }
 
   const formatTokens = new Set(
-    (format ?? "")
+    format
       .split(",")
       .map((token) => normalizeExperienceToken(token))
       .filter(Boolean),
