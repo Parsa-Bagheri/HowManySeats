@@ -1,32 +1,67 @@
 # HowManySeats?
 
-The app estimates occupied and open seats at nearby Cineplex showtimes.
+HowManySeats estimates occupied and open seats at nearby Cineplex showtimes.
+Search by Canadian address, postal code, or city; narrow the results; then open
+Cineplex to buy tickets or preview the seat map.
 
-## What's included
+The project is an independent, unofficial tool and is not affiliated with
+Cineplex.
 
-- Next.js and Tailwind CSS search interface
-- Optional Google Maps address suggestions with a manual-entry fallback
-- Search ranges of up to three days
-- A multiselect theatre-format filter
-- A Node.js API route written in TypeScript
-- A command-line interface (CLI) collector that uses live Cineplex showtime and
-  preview seat-occupancy data
-- Separate Cineplex links for buying tickets and previewing seats
-- Seat classification and confidence scoring
-- Discovery, schema, and compliance notes
+## Features
 
-The app uses these Cineplex public site APIs:
+- Two visual themes with the same search and result functionality
+- Optional Google Maps address suggestions with manual entry when Maps is not
+  configured or unavailable
+- Searches covering one to three consecutive days
+- Radius options from 10 to 100 kilometres
+- Movie-title suggestions based on nearby showtimes
+- Theatre-type filtering for formats such as IMAX, UltraAVX, VIP, D-BOX, 4DX,
+  ScreenX, and 3D
+- Filters for empty showtimes, five-or-fewer occupied seats, showtimes starting
+  within two hours, non-VIP showtimes, and accessible seating
+- Distance and start-time sorting
+- Direct links to Cineplex's public purchase flow and seat-map preview
+- Separate tracking for available, occupied, blocked, accessible, and unknown
+  seats
 
-- `GET /prod/cpx/theatrical/api/v1/showtimes`
-- `GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout`
-- `GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true`
+## How it works
 
-The app doesn't call `reserve-seats`, `set-tickets`, payment, cart mutation,
-sign-in, or checkout endpoints.
+The Next.js API routes resolve the search location, find nearby Cineplex
+theatres, fetch their showtimes, and inspect a bounded number of seat maps. The
+app uses read-only Cineplex public-site GET endpoints:
 
-## Set up
+```text
+GET /prod/cpx/theatrical/api/v1/theatres
+GET /prod/cpx/theatrical/api/v1/showtimes
+GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout
+GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true
+```
 
-Run these commands:
+It does not call seat-reservation, ticket-selection, cart, payment, sign-in, or
+checkout endpoints.
+
+## Seat estimates
+
+The estimate is derived from the current preview seat map:
+
+- `Available` standard seats count as open.
+- `Occupied` and held standard seats count toward the occupied estimate.
+- Broken, blocked, unavailable, and house-reserved seats are tracked as
+  blocked rather than occupied.
+- Wheelchair and companion seats are tracked separately as accessible seats.
+- Unrecognized and post-showtime values are tracked as unknown.
+
+Seat availability can change at any time. Treat the numbers as a snapshot, not
+as a guarantee from Cineplex.
+
+## Local development
+
+Requirements:
+
+- A current Node.js LTS release
+- npm
+
+Install dependencies and create a local environment file from `.env.example`:
 
 ```bash
 npm install
@@ -34,68 +69,42 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open the [local app](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000).
 
-To enable Google Maps address suggestions:
+### Environment variables
 
-1. Add a browser-restricted Google Maps API key to
-   `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`.
-2. Enable the Maps JavaScript API and Places API (New) for the key.
+| Variable | Purpose |
+| --- | --- |
+| `CINEPLEX_APIM_SUBSCRIPTION_KEY` | Optional override for the public Cineplex site API key used by the server |
+| `CINEPLEX_MAX_THEATRES_PER_SEARCH` | Maximum nearby theatres inspected per search; defaults to `5` |
+| `CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH` | Maximum showtime seat maps inspected per search; defaults to `40` |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Optional browser-restricted key for Google Maps address suggestions |
 
-If you don't add a key, the field continues to accept a manually entered
-address, postal code, or city.
+For Google address suggestions, enable the Maps JavaScript API and Places API
+(New). Restrict the key to the app's allowed browser origins. Without the key,
+the address field remains a standard manual-entry field.
 
-## Use the command-line collector
+## Commands
 
-Run the collector with a location, date, and radius:
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Start the local Next.js development server |
+| `npm run build` | Create an optimized production build |
+| `npm start` | Run the production build |
+| `npm test` | Run the Node.js test suite |
+| `npm run typecheck` | Run strict TypeScript checks without emitting files |
 
-```bash
-npm run collect -- --location="Ottawa" --date="2026-05-05" --radius=25
+## Project structure
+
+```text
+src/app/       Next.js pages, UI, styles, and API routes
+src/lib/       Cineplex client, search logic, geocoding, and seat scoring
+docs/          Technical discovery and compliance notes
 ```
 
-The command returns output like this:
-
-```json
-[
-  {
-    "theatre": "Scotiabank Theatre Ottawa",
-    "movie": "Example Movie",
-    "time": "21:20",
-    "format": "Recliner",
-    "occupied_estimate": 0,
-    "available_count": 64,
-    "sellable_seats": 64,
-    "blocked_count": 0,
-    "accessibility_count": 4,
-    "unknown_count": 0,
-    "confidence": "high",
-    "purchase_url": "https://apis.cineplex.com/prod/cpx/theatrical/deeplink?s=123&a=1&l=7402&m=example-movie",
-    "seat_preview_url": "https://www.cineplex.com/en-Mobile/ticketing/preview?theatreId=7402&showtimeId=123&dbox=False"
-  }
-]
-```
-
-## Live data notes
-
-The app maps seat statuses as follows:
-
-- Layout types `Wheelchair` and `Companion` increment `accessibility_count`,
-  not the occupied estimate.
-- Preview value `Available` increments `available_count`.
-- Preview value `Occupied` increments the occupied estimate.
-- Values such as `Broken`, unavailable, blocked, or house-reserved increment
-  `blocked_count`.
-- Unrecognized values increment `unknown_count`.
-- A post-showtime response with no availability increments `unknown_count`
-  instead of `available_count`.
-
-## Optional schema
-
-The initial product plan includes PostgreSQL persistence. The current app reads
-live Cineplex preview data and doesn't require PostgreSQL or Redis. The optional
-schema is in `db/migrations/001_init.sql`.
+Tests are colocated with the library modules as `*.test.ts` files.
 
 ## Acknowledgment
 
 Riley Walz's [Empty Screenings](https://walzr.com/empty-screenings) inspired
-this project. It explores the same private-theatre idea.
+this project.
