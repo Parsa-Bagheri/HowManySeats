@@ -9,6 +9,7 @@ import { showtimeMatchesExperienceTypes } from "./experience-types";
 import { buildSeatSnapshot } from "./seat-scoring";
 import type {
   MovieSuggestion,
+  MovieSuggestionQuery,
   RawSeat,
   SearchQuery,
   SearchResult,
@@ -94,14 +95,6 @@ type ShowtimeCandidate = {
   theatre: Theatre;
   showtime: Showtime;
   distanceKm?: number;
-};
-
-type MovieSuggestionQuery = Pick<
-  SearchQuery,
-  "location" | "date" | "endDate" | "radiusKm" | "latitude" | "longitude"
-> & {
-  movieTitle: string;
-  limit?: number;
 };
 
 export class CineplexClient {
@@ -310,7 +303,7 @@ export class CineplexClient {
   async getShowtimes(theatre: Theatre, date: string): Promise<Showtime[]> {
     const url = `${THEATRICAL_API_BASE}/v1/showtimes?${new URLSearchParams({
       language: "en",
-      locationId: theatre.cineplexId,
+      locationId: theatre.providerTheatreId,
       date,
     })}`;
     const response = await this.getJson<CineplexShowtimeResponse>(url, []);
@@ -334,8 +327,8 @@ export class CineplexClient {
               );
               const dbox = /D-BOX/i.test(format);
               showtimes.push({
-                id: `${theatre.cineplexId}-${session.vistaSessionId}`,
-                cineplexShowtimeId: String(session.vistaSessionId),
+                id: `cineplex-${theatre.providerTheatreId}-${session.vistaSessionId}`,
+                providerShowtimeId: String(session.vistaSessionId),
                 theatreId: theatre.id,
                 movieTitle: movie.name,
                 startsAt: session.showStartDateTime,
@@ -346,7 +339,7 @@ export class CineplexClient {
                     ? undefined
                     : normalizePublicPurchaseUrl(session.deeplinkUrl),
                 seatPreviewUrl: buildPublicSeatMapUrl(
-                  theatre.cineplexId,
+                  theatre.providerTheatreId,
                   session,
                   dbox,
                 ),
@@ -366,10 +359,10 @@ export class CineplexClient {
   ): Promise<SeatSnapshot> {
     const [layout, availability] = await Promise.all([
       this.getJson<SeatLayout>(
-        `${TICKETING_API_BASE}/v1/theatre/${theatre.cineplexId}/showtime/${showtime.cineplexShowtimeId}/seat-layout`,
+        `${TICKETING_API_BASE}/v1/theatre/${theatre.providerTheatreId}/showtime/${showtime.providerShowtimeId}/seat-layout`,
       ),
       this.getJson<SeatAvailability>(
-        `${TICKETING_API_BASE}/v1/theatre/${theatre.cineplexId}/showtime/${showtime.cineplexShowtimeId}/seat-availability?preview=true`,
+        `${TICKETING_API_BASE}/v1/theatre/${theatre.providerTheatreId}/showtime/${showtime.providerShowtimeId}/seat-availability?preview=true`,
       ),
     ]);
 
@@ -610,7 +603,8 @@ function compareMovieSuggestions(
 function toTheatre(theatre: CineplexTheatre): Theatre {
   return {
     id: `cineplex-${theatre.theatreId}`,
-    cineplexId: String(theatre.theatreId),
+    provider: "cineplex",
+    providerTheatreId: String(theatre.theatreId),
     name: theatre.theatreName,
     address: theatre.location?.address,
     city: theatre.location?.city ?? "",

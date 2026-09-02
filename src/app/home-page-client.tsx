@@ -47,7 +47,13 @@ import {
   type SearchFilters,
   type SearchState,
 } from "@/lib/search-state";
-import type { MovieSuggestion, SearchResult, SortOption } from "@/lib/types";
+import type {
+  CinemaProvider,
+  MovieSuggestion,
+  SearchResult,
+  SortOption,
+  Theatre,
+} from "@/lib/types";
 import {
   UI_MODE_COOKIE_NAME,
   type UiMode,
@@ -577,7 +583,7 @@ function CleanHomeView(props: SearchViewProps) {
       </div>
       <footer className="mx-auto mt-5 grid w-full max-w-7xl gap-1 border-t border-neutral-900 pt-4 text-center text-xs text-neutral-500">
         <p>Made in Waterloo, with love</p>
-        <p>This site is not affiliated with Cineplex.</p>
+        <p>This site is not affiliated with Cineplex or Landmark Cinemas.</p>
       </footer>
     </main>
   );
@@ -747,7 +753,7 @@ function FunHomeView(props: SearchViewProps) {
             Made in Waterloo, with love
           </span>
           <span className="inline-block justify-self-center rotate-1 bg-white px-3 py-1 text-[0.7rem] shadow-[5px_5px_0_#111111]">
-            This site is not affiliated with Cineplex.
+            This site is not affiliated with Cineplex or Landmark Cinemas.
           </span>
         </footer>
       </div>
@@ -1458,12 +1464,17 @@ function CleanFilterToggle({
 function CleanResultCard({ result }: { result: SearchResult }) {
   const startsAt = new Date(result.showtime.startsAt);
   const checkedAt = new Date(result.snapshot.checkedAt);
-  const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString()}`;
+  const providerLabel = cinemaProviderLabel(result.theatre.provider);
+  const timeZoneOptions = theatreTimeZoneOptions(result.theatre);
+  const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString([], timeZoneOptions)}`;
 
   return (
     <article className="result-card rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_14px_44px_rgba(0,0,0,0.28)]">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-800 pb-3">
         <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">
+            {providerLabel}
+          </p>
           <h2 className="text-lg font-semibold text-white">
             {result.theatre.name}
           </h2>
@@ -1482,7 +1493,7 @@ function CleanResultCard({ result }: { result: SearchResult }) {
               href={result.showtime.purchaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Buy tickets for ${showtimeLinkContext} on Cineplex (opens in a new tab)`}
+              aria-label={`Buy tickets for ${showtimeLinkContext} on ${providerLabel} (opens in a new tab)`}
             >
               Buy tickets
               <ExternalLink className="h-4 w-4" aria-hidden="true" />
@@ -1510,12 +1521,14 @@ function CleanResultCard({ result }: { result: SearchResult }) {
           <p className="flex items-center gap-2 font-semibold text-neutral-100">
             <Clock className="h-4 w-4 text-emerald-300" aria-hidden="true" />
             {startsAt.toLocaleDateString([], {
+              ...timeZoneOptions,
               weekday: "short",
               month: "short",
               day: "numeric",
             })}{" "}
             at{" "}
             {startsAt.toLocaleTimeString([], {
+              ...timeZoneOptions,
               hour: "numeric",
               minute: "2-digit",
             })}{" "}
@@ -1631,7 +1644,9 @@ function FunFilterToggle({
 function FunResultCard({ result }: { result: SearchResult }) {
   const startsAt = new Date(result.showtime.startsAt);
   const checkedAt = new Date(result.snapshot.checkedAt);
-  const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString()}`;
+  const providerLabel = cinemaProviderLabel(result.theatre.provider);
+  const timeZoneOptions = theatreTimeZoneOptions(result.theatre);
+  const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString([], timeZoneOptions)}`;
   const openSeats = Math.max(
     0,
     result.snapshot.sellableSeats - result.snapshot.occupiedEstimate,
@@ -1650,6 +1665,9 @@ function FunResultCard({ result }: { result: SearchResult }) {
     >
       <div className="chaos-card-head grid gap-3 border-b-[6px] border-black p-4 lg:grid-cols-[1fr_auto]">
         <div className="min-w-0">
+          <p className="mb-2 text-xs font-black uppercase tracking-[0.16em]">
+            {providerLabel}
+          </p>
           <h2 className="text-[clamp(1.75rem,4vw,2.6rem)] font-black uppercase leading-none text-black">
             {result.theatre.name}
           </h2>
@@ -1670,7 +1688,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
               href={result.showtime.purchaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Buy tickets for ${showtimeLinkContext} on Cineplex (opens in a new tab)`}
+              aria-label={`Buy tickets for ${showtimeLinkContext} on ${providerLabel} (opens in a new tab)`}
             >
               Buy tickets
               <ExternalLink className="h-4 w-4" aria-hidden="true" />
@@ -1700,6 +1718,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
               <Clock className="h-5 w-5 text-[#00a651]" aria-hidden="true" />
               <span>
                 {startsAt.toLocaleDateString([], {
+                  ...timeZoneOptions,
                   weekday: "short",
                   month: "short",
                   day: "numeric",
@@ -1707,6 +1726,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
               </span>
               <span>
                 {startsAt.toLocaleTimeString([], {
+                  ...timeZoneOptions,
                   hour: "numeric",
                   minute: "2-digit",
                 })}
@@ -1814,6 +1834,16 @@ function isFilterChecked(
   return option.todayOnly
     ? selectedDateIsToday && filters[option.key]
     : filters[option.key];
+}
+
+function cinemaProviderLabel(provider: CinemaProvider): string {
+  return provider === "landmark" ? "Landmark Cinemas" : "Cineplex";
+}
+
+function theatreTimeZoneOptions(
+  theatre: Theatre,
+): Pick<Intl.DateTimeFormatOptions, "timeZone"> {
+  return theatre.timeZone ? { timeZone: theatre.timeZone } : {};
 }
 
 function sortLabel(sortBy: SortOption): string {

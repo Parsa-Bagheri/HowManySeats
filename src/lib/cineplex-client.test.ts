@@ -81,8 +81,9 @@ test("maps purchase and preview links from Cineplex showtimes", async (t) => {
   const client = new CineplexClient("test-key");
   const showtimes = await client.getShowtimes(
     {
-      id: "7402",
-      cineplexId: "7402",
+      id: "cineplex-7402",
+      provider: "cineplex",
+      providerTheatreId: "7402",
       name: "Example Theatre",
       city: "Example City",
       province: "ON",
@@ -110,8 +111,9 @@ test("treats an empty showtime response as no showtimes", async (t) => {
   const client = new CineplexClient("test-key");
   const showtimes = await client.getShowtimes(
     {
-      id: "7402",
-      cineplexId: "7402",
+      id: "cineplex-7402",
+      provider: "cineplex",
+      providerTheatreId: "7402",
       name: "Example Theatre",
       city: "Example City",
       province: "ON",

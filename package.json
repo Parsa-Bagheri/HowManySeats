@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test src/lib/cineplex-client.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts",
+    "test": "node --import tsx --test src/lib/cinema-search.test.ts src/lib/cineplex-client.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/landmark-client.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -16,6 +16,9 @@
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "zod": "^3.24.4"
+  },
+  "engines": {
+    "node": ">=22.17.0"
   },
   "overrides": {
     "next": {

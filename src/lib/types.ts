@@ -3,9 +3,12 @@ import type { ShowtimeExperienceType } from "./experience-types";
 export type SortOption =
   "distance-asc" | "distance-desc" | "time-asc" | "time-desc";
 
+export type CinemaProvider = "cineplex" | "landmark";
+
 export type Theatre = {
   id: string;
-  cineplexId: string;
+  provider: CinemaProvider;
+  providerTheatreId: string;
   name: string;
   address?: string;
   city: string;
@@ -13,11 +16,12 @@ export type Theatre = {
   postalCode?: string;
   latitude?: number;
   longitude?: number;
+  timeZone?: string;
 };
 
 export type Showtime = {
   id: string;
-  cineplexShowtimeId: string;
+  providerShowtimeId: string;
   theatreId: string;
   movieTitle: string;
   startsAt: string;
@@ -45,6 +49,14 @@ export type MovieSuggestion = {
   title: string;
   theatreCount: number;
   showtimeCount: number;
+};
+
+export type MovieSuggestionQuery = Pick<
+  SearchQuery,
+  "location" | "date" | "endDate" | "radiusKm" | "latitude" | "longitude"
+> & {
+  movieTitle: string;
+  limit?: number;
 };
 
 export type SearchQuery = {

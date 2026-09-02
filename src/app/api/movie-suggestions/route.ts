@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { CineplexClient } from "@/lib/cineplex-client";
+import { CinemaSearch } from "@/lib/cinema-search";
 import {
   searchAreaSchema,
   searchParamsToRecord,
   validateSearchArea,
 } from "@/lib/search-request";
+
+export const maxDuration = 60;
+export const runtime = "nodejs";
 
 const suggestionSchema = searchAreaSchema.extend({
   query: z.string().min(2).max(120),
@@ -41,7 +44,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const suggestions = await new CineplexClient().suggestMovieTitles({
+    const suggestions = await new CinemaSearch().suggestMovieTitles({
       location: parsed.data.location,
       date: parsed.data.date,
       endDate: parsed.data.endDate ?? parsed.data.date,
@@ -54,12 +57,11 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ suggestions });
   } catch (error) {
-    console.error("Cineplex movie suggestion request failed", error);
+    console.error("Movie suggestion request failed", error);
 
     return NextResponse.json(
       {
-        error:
-          "Cineplex movie suggestions are temporarily unavailable. Try again.",
+        error: "Movie suggestions are temporarily unavailable. Try again.",
       },
       { status: 502 },
     );

@@ -1,11 +1,12 @@
 # HowManySeats?
 
-HowManySeats estimates occupied and open seats at nearby Cineplex showtimes.
-Search by Canadian address, postal code, or city; narrow the results; then open
-Cineplex to buy tickets or preview the seat map.
+HowManySeats estimates occupied and open seats at nearby Cineplex and Landmark
+Cinemas showtimes. Search by Canadian address, postal code, or city. You can
+then filter the results, buy tickets through the cinema, or preview the seat
+map.
 
 The project is an independent, unofficial tool and is not affiliated with
-Cineplex.
+Cineplex or Landmark Cinemas.
 
 ## Features
 
@@ -13,21 +14,24 @@ Cineplex.
 - Optional Google Maps address suggestions with manual entry when Maps is not
   configured or unavailable
 - Searches covering one to three consecutive days
-- Radius options from 10 to 100 kilometres
+- Radius options from 10 to 100 kilometers
 - Movie-title suggestions based on nearby showtimes
-- Theatre-type filtering for formats such as IMAX, UltraAVX, VIP, D-BOX, 4DX,
-  ScreenX, and 3D
+- Experience filtering for formats such as IMAX, UltraAVX, Laser Ultra, VIP,
+  D-BOX, ScreenX, Premiere, and 3D
 - Filters for empty showtimes, five-or-fewer occupied seats, showtimes starting
   within two hours, non-VIP showtimes, and accessible seating
 - Distance and start-time sorting
-- Direct links to Cineplex's public purchase flow and seat-map preview
+- Direct links to each cinema's public purchase flow and seat-map preview
 - Counts for sellable, occupied, and accessible seats
 
 ## How it works
 
-The Next.js API routes resolve the search location, find nearby Cineplex
-theatres, fetch their showtimes, and inspect a bounded number of seat maps. The
-app uses read-only Cineplex public-site GET endpoints:
+The Next.js API routes resolve the search location, find nearby theaters, fetch
+showtimes, and inspect a bounded number of seat maps. Cineplex and Landmark run
+in parallel. If one provider is temporarily unavailable, the app still returns
+results from the other provider.
+
+The Cineplex client uses these read-only public-site `GET` endpoints:
 
 ```text
 GET /prod/cpx/theatrical/api/v1/theatres
@@ -36,9 +40,27 @@ GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout
 GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true
 ```
 
+The Landmark client reads the embedded showtime data from each public theater
+page through Jina Reader's plain HTTP engine. It then sends Landmark's
+read-only seat-preview request directly:
+
+```text
+GET /showtimes/{theatreSlug}
+POST /Umbraco/Api/SeatMapApi/GetSessionSeatMap
+```
+
+The client keeps parsed theater pages in a bounded 60-second cache. Jina Reader
+also caches the public page, which avoids browser startup and repeated page
+downloads. A Jina API key is optional for development and raises the service's
+rate limit for production traffic.
+
+Landmark opens seat previews in a modal instead of providing a standalone
+preview URL. HowManySeats provides a read-only preview page and links each
+Landmark result to that page. Ticket purchases continue on Landmark's website.
+
 ## Seat estimates
 
-The estimate is derived from the current preview seat map:
+The estimate comes from the current preview seat map:
 
 - `Available` standard seats count as open.
 - `Occupied`, `Sold`, `Held`, and `Reserved` standard seats count toward the
@@ -47,16 +69,17 @@ The estimate is derived from the current preview seat map:
   and statuses are excluded from the estimate.
 
 Seat availability can change at any time. Treat the numbers as a snapshot, not
-as a guarantee from Cineplex.
+as a guarantee from either cinema provider.
 
 ## Local development
 
 Requirements:
 
-- A current Node.js LTS release
+- Node.js 22.17 or later
 - npm
 
-Install dependencies and create a local environment file from `.env.example`:
+Install dependencies, create a local environment file, and start the
+development server:
 
 ```bash
 npm install
@@ -71,8 +94,13 @@ Open [http://localhost:3000](http://localhost:3000).
 | Variable | Purpose |
 | --- | --- |
 | `CINEPLEX_APIM_SUBSCRIPTION_KEY` | Optional override for the public Cineplex site API key used by the server |
-| `CINEPLEX_MAX_THEATRES_PER_SEARCH` | Maximum nearby theatres inspected per search; defaults to `5` |
+| `CINEPLEX_MAX_THEATRES_PER_SEARCH` | Maximum nearby theaters inspected per search; defaults to `5` |
 | `CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH` | Maximum showtime seat maps inspected per search; defaults to `40` |
+| `JINA_API_KEY` | Optional server-side Jina Reader key for a higher Landmark page-fetch rate limit |
+| `LANDMARK_SOURCE_ORIGIN` | Optional comma-separated list of official Landmark source origins |
+| `LANDMARK_READER_CACHE_SECONDS` | Maximum age for cached Landmark theater pages; defaults to `60` and is capped at `300` |
+| `LANDMARK_MAX_THEATRES_PER_SEARCH` | Maximum nearby Landmark theaters inspected per search; defaults to `5` |
+| `LANDMARK_MAX_SEAT_CHECKS_PER_SEARCH` | Maximum Landmark seat maps inspected per search; defaults to `40` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Optional browser-restricted key for Google Maps address suggestions |
 
 For Google address suggestions, enable the Maps JavaScript API and Places API
@@ -93,7 +121,7 @@ the address field remains a standard manual-entry field.
 
 ```text
 src/app/       Next.js pages, UI, styles, and API routes
-src/lib/       Cineplex client, search logic, geocoding, and seat scoring
+src/lib/       Provider clients, search logic, geocoding, and seat scoring
 ```
 
 Tests are colocated with the library modules as `*.test.ts` files.

@@ -11,6 +11,9 @@ export const SHOWTIME_EXPERIENCE_TYPES = [
   "Recliner",
   "Dolby Atmos",
   "Laser Projection",
+  "Laser Ultra",
+  "Premiere",
+  "Infinity Vision",
 ] as const;
 
 export type ShowtimeExperienceType = (typeof SHOWTIME_EXPERIENCE_TYPES)[number];

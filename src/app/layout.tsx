@@ -3,7 +3,8 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "HowManySeats?",
-  description: "Find how many seats are left at nearby Cineplex showtimes.",
+  description:
+    "Estimate open and occupied seats at nearby Cineplex and Landmark Cinemas showtimes.",
 };
 
 export default function RootLayout({

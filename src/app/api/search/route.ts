@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { CineplexClient } from "@/lib/cineplex-client";
+import { CinemaSearch } from "@/lib/cinema-search";
 import { parseShowtimeExperienceTypes } from "@/lib/experience-types";
 import {
   searchAreaSchema,
   searchParamsToRecord,
   validateSearchArea,
 } from "@/lib/search-request";
+
+export const maxDuration = 60;
+export const runtime = "nodejs";
 
 const booleanParam = z
   .enum(["true", "false"])
@@ -56,18 +59,18 @@ export async function GET(request: Request) {
   }
 
   try {
-    const results = await new CineplexClient().search({
+    const results = await new CinemaSearch().search({
       ...parsed.data,
       endDate: parsed.data.endDate ?? parsed.data.date,
     });
 
     return NextResponse.json({ results });
   } catch (error) {
-    console.error("Cineplex search request failed", error);
+    console.error("Cinema search request failed", error);
 
     return NextResponse.json(
       {
-        error: "Cineplex search is temporarily unavailable. Try again.",
+        error: "Cinema search is temporarily unavailable. Try again.",
       },
       { status: 502 },
     );
