@@ -472,50 +472,29 @@ export class LandmarkClient {
       throw new Error("The Landmark external session ID is invalid.");
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-    const headers = new Headers({
-      Accept: "application/json, text/javascript, */*; q=0.01",
-      "Accept-Language": "en-CA,en;q=0.9",
-      "Content-Type": "application/json; charset=UTF-8",
-      Origin: context.origin,
-      Referer: `${context.origin}/showtimes/${theatre.slug}`,
-      "User-Agent": browserUserAgent(),
-      "X-Requested-With": "XMLHttpRequest",
-      "X-XSRF-TOKEN": context.token,
-    });
+    const origins = Array.from(
+      new Set([context.origin, ...this.sourceOrigins, LANDMARK_PUBLIC_ORIGIN]),
+    );
+    const failures: unknown[] = [];
 
-    if (context.cookieHeader) {
-      headers.set("Cookie", context.cookieHeader);
-    }
-
-    try {
-      const response = await fetch(
-        `${context.origin}/Umbraco/Api/SeatMapApi/GetSessionSeatMap`,
-        {
-          body: JSON.stringify({
-            CinemaId: theatre.providerTheatreId,
-            ExternalSessionId: externalSessionId,
-            SessionId: sessionId,
-          }),
-          cache: "no-store",
-          headers,
-          method: "POST",
-          signal: controller.signal,
-        },
-      );
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new Error(
-          `Landmark seat preview failed with HTTP ${response.status}: ${body.slice(0, 160)}`,
-        );
+    for (const origin of origins) {
+      try {
+        return await fetchLandmarkSeatMap({
+          context,
+          externalSessionId,
+          origin,
+          sessionId,
+          theatre,
+        });
+      } catch (error) {
+        failures.push(error);
       }
-
-      return (await response.json()) as LandmarkSeatMapResponse;
-    } finally {
-      clearTimeout(timeout);
     }
+
+    throw new AggregateError(
+      failures,
+      "Landmark seat previews are unavailable.",
+    );
   }
 
   private async resolveSearchArea(
@@ -610,6 +589,65 @@ export class LandmarkClient {
       failures,
       `Landmark showtimes are unavailable for ${theatre.name}.`,
     );
+  }
+}
+
+async function fetchLandmarkSeatMap({
+  context,
+  externalSessionId,
+  origin,
+  sessionId,
+  theatre,
+}: {
+  context: LandmarkPageContext;
+  externalSessionId: string;
+  origin: string;
+  sessionId: string;
+  theatre: LandmarkTheatre;
+}): Promise<LandmarkSeatMapResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  const headers = new Headers({
+    Accept: "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-CA,en;q=0.9",
+    "Content-Type": "application/json; charset=UTF-8",
+    Origin: origin,
+    Referer: `${origin}/showtimes/${theatre.slug}`,
+    "User-Agent": browserUserAgent(),
+    "X-Requested-With": "XMLHttpRequest",
+    "X-XSRF-TOKEN": context.token,
+  });
+
+  if (context.cookieHeader && origin === context.origin) {
+    headers.set("Cookie", context.cookieHeader);
+  }
+
+  try {
+    const response = await fetch(
+      `${origin}/Umbraco/Api/SeatMapApi/GetSessionSeatMap`,
+      {
+        body: JSON.stringify({
+          CinemaId: theatre.providerTheatreId,
+          ExternalSessionId: externalSessionId,
+          SessionId: sessionId,
+        }),
+        cache: "no-store",
+        headers,
+        method: "POST",
+        signal: controller.signal,
+      },
+    );
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(
+        `Landmark seat preview failed with HTTP ${response.status}: ${body.slice(0, 160)}`,
+      );
+    }
+
+    return (await response.json()) as LandmarkSeatMapResponse;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

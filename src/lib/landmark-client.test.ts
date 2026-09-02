@@ -214,7 +214,7 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   const originalFetch = globalThis.fetch;
   let readerHeaders: Headers | undefined;
   let readerRequests = 0;
-  let seatRequests = 0;
+  const seatRequests: string[] = [];
   const movies: LandmarkMovie[] = [
     {
       FilmId: 126642,
@@ -258,7 +258,15 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
       url ===
       "https://www.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap"
     ) {
-      seatRequests += 1;
+      seatRequests.push(url);
+      return new Response("Access denied", { status: 403 });
+    }
+
+    if (
+      url ===
+      "https://web5.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap"
+    ) {
+      seatRequests.push(url);
       return Response.json({
         Data: {
           Seats: [
@@ -300,7 +308,10 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   assert.equal(firstShowtimes.length, 1);
   assert.equal(secondShowtimes.length, 1);
   assert.equal(preview.snapshot.sellableSeats, 1);
-  assert.equal(seatRequests, 1);
+  assert.deepEqual(seatRequests, [
+    "https://www.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap",
+    "https://web5.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap",
+  ]);
 });
 
 test("fails clearly when every plain HTTP source is blocked", async (t) => {
