@@ -9,7 +9,7 @@ import {
 } from "@/lib/search-request";
 
 export const maxDuration = 60;
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 const booleanParam = z
   .enum(["true", "false"])

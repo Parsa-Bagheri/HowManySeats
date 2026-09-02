@@ -9,6 +9,7 @@ import {
 import { getLandmarkTheatre } from "@/lib/landmark-theatres";
 
 export const dynamic = "force-dynamic";
+export const runtime = "edge";
 
 export const metadata: Metadata = {
   title: "Landmark seat preview | HowManySeats?",
