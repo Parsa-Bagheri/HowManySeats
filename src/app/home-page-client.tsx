@@ -47,9 +47,11 @@ import {
   type SearchFilters,
   type SearchState,
 } from "@/lib/search-state";
+import { fetchLandmarkSeatPreview } from "@/lib/landmark-seats";
 import type {
   CinemaProvider,
   MovieSuggestion,
+  SearchCandidate,
   SearchResult,
   SortOption,
   Theatre,
@@ -134,6 +136,7 @@ const SORT_LABELS = {
 const THEME_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const FUN_RESULT_BATCH_SIZE = 12;
+const LANDMARK_SEAT_CHECK_CONCURRENCY = 6;
 
 const funInputClass =
   "focus-ring h-12 w-full border-4 border-black bg-[#fff8df] px-3 text-base font-black text-black shadow-[6px_6px_0_#111111] transition placeholder:text-zinc-500 focus:-translate-y-0.5 focus:shadow-[8px_8px_0_#111111]";
@@ -265,7 +268,7 @@ export default function HomePageClient({
     try {
       const response = await fetch(`/api/search?${params.toString()}`);
       const body = (await response.json()) as
-        | { results: SearchResult[] }
+        | { results: SearchCandidate[] }
         | { error: string };
 
       if (!response.ok || !("results" in body)) {
@@ -278,7 +281,7 @@ export default function HomePageClient({
         return;
       }
 
-      setResults(body.results);
+      setResults(await loadSeatSnapshots(body.results, state));
     } catch {
       setResults([]);
       setError(
@@ -492,6 +495,63 @@ export default function HomePageClient({
 
 function rememberUiModePreference(mode: UiMode) {
   document.cookie = `${UI_MODE_COOKIE_NAME}=${mode}; Path=/; Max-Age=${UI_MODE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
+}
+
+async function loadSeatSnapshots(
+  candidates: SearchCandidate[],
+  state: SearchState,
+): Promise<SearchResult[]> {
+  const results: Array<SearchResult | undefined> = new Array(
+    candidates.length,
+  );
+
+  for (
+    let offset = 0;
+    offset < candidates.length;
+    offset += LANDMARK_SEAT_CHECK_CONCURRENCY
+  ) {
+    const batch = candidates.slice(
+      offset,
+      offset + LANDMARK_SEAT_CHECK_CONCURRENCY,
+    );
+
+    await Promise.all(
+      batch.map(async (candidate, batchIndex) => {
+        let result: SearchResult | undefined;
+
+        if (candidate.snapshot) {
+          result = candidate as SearchResult;
+        } else if (candidate.theatre.provider === "landmark") {
+          try {
+            const preview = await fetchLandmarkSeatPreview(
+              candidate.theatre.providerTheatreId,
+              candidate.showtime.providerShowtimeId,
+            );
+            result = { ...candidate, snapshot: preview.snapshot };
+          } catch {
+            return;
+          }
+        }
+
+        if (result && matchesSeatFilters(result, state.filters)) {
+          results[offset + batchIndex] = result;
+        }
+      }),
+    );
+  }
+
+  return results.filter((result): result is SearchResult => Boolean(result));
+}
+
+function matchesSeatFilters(
+  result: SearchResult,
+  filters: SearchFilters,
+): boolean {
+  return (
+    (!filters.onlyZeroSold || result.snapshot.occupiedEstimate === 0) &&
+    (!filters.maxFiveSold || result.snapshot.occupiedEstimate <= 5) &&
+    (!filters.accessibleAvailable || result.snapshot.accessibilityCount > 0)
+  );
 }
 
 function CleanHomeView(props: SearchViewProps) {

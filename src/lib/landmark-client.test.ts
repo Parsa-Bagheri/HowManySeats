@@ -7,6 +7,7 @@ import {
   localDateTimeToIso,
   type LandmarkMovie,
 } from "./landmark-client";
+import { fetchLandmarkSeatPreview } from "./landmark-seats";
 import { getLandmarkTheatre } from "./landmark-theatres";
 
 const sourceOrigin = "https://source.landmark.test";
@@ -121,10 +122,20 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
   const client = new LandmarkClient([sourceOrigin]);
   const showtimes = await client.getShowtimes(waterloo, "2026-09-01");
   const nextDay = await client.getShowtimes(waterloo, "2026-09-02");
+  const candidates = await client.search({
+    date: "2026-09-01",
+    endDate: "2026-09-01",
+    latitude: waterloo.latitude,
+    location: "Waterloo",
+    longitude: waterloo.longitude,
+    radiusKm: 25,
+  });
 
   assert.equal(pageRequests, 1);
   assert.equal(showtimes.length, 1);
   assert.deepEqual(nextDay, []);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0]?.snapshot, undefined);
   assert.equal(showtimes[0]?.id, "landmark-200-11567088");
   assert.equal(showtimes[0]?.providerShowtimeId, "11567088");
   assert.equal(showtimes[0]?.startsAt, "2026-09-01T23:30:00.000Z");
@@ -182,10 +193,7 @@ test("gets Landmark booking API data and normalizes its seat map", async (t) => 
     throw new Error(`Unexpected request: ${url}`);
   };
 
-  const preview = await new LandmarkClient([sourceOrigin]).getSeatPreview(
-    waterloo,
-    "11567088",
-  );
+  const preview = await fetchLandmarkSeatPreview("200", "11567088");
 
   assert.equal(seatRequest?.method, undefined);
   assert.equal(seatRequest?.headers.get("accept"), "application/json");
@@ -271,10 +279,7 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
     waterloo,
     "2026-09-01",
   );
-  const preview = await secondClient.getSeatPreview(
-    waterloo,
-    "11567088",
-  );
+  const preview = await fetchLandmarkSeatPreview("200", "11567088");
 
   assert.equal(readerRequests, 1);
   assert.equal(readerHeaders?.get("x-engine"), "direct");

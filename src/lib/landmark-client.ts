@@ -11,22 +11,17 @@ import {
   LANDMARK_THEATRES,
   type LandmarkTheatre,
 } from "./landmark-theatres";
-import { buildSeatSnapshot } from "./seat-scoring";
 import type {
   MovieSuggestion,
   MovieSuggestionQuery,
-  RawSeat,
+  SearchCandidate,
   SearchQuery,
-  SearchResult,
-  SeatSnapshot,
   Showtime,
   SortOption,
   Theatre,
 } from "./types";
 
 const LANDMARK_PUBLIC_ORIGIN = "https://www.landmarkcinemas.com";
-const LANDMARK_BOOKING_API_ORIGIN =
-  "https://bookingapi.landmarkcinemas.com";
 const DEFAULT_SOURCE_ORIGINS = [
   LANDMARK_PUBLIC_ORIGIN,
   "https://web5.landmarkcinemas.com",
@@ -35,7 +30,6 @@ const LANDMARK_READER_ORIGIN = "https://r.jina.ai";
 const DEFAULT_READER_CACHE_SECONDS = 60;
 const MAX_READER_CACHE_SECONDS = 300;
 const MAX_READER_CACHE_ENTRIES = 16;
-const SEAT_CHECK_CONCURRENCY = 4;
 const MAX_SUGGESTION_THEATRES = 8;
 const SOURCE_TIMEOUT_MS = 10_000;
 
@@ -87,39 +81,10 @@ type CachedLandmarkPage = {
 
 const readerPageCache = new Map<string, CachedLandmarkPage>();
 
-type LandmarkSeatRecord = Record<string, unknown> & {
-  Column?: number | string;
-  Row?: number | string;
-  SeatId?: number | string;
-  SeatName?: string;
-  Status?: number | string;
-  Style?: number | string;
-  Type?: number | string;
-};
-
 type ShowtimeCandidate = {
   distanceKm?: number;
   showtime: Showtime;
   theatre: LandmarkTheatre;
-};
-
-export type LandmarkPreviewSeat = {
-  accessible: boolean;
-  column: number;
-  id: string;
-  label: string;
-  status: "available" | "unavailable";
-};
-
-export type LandmarkPreviewRow = {
-  label: string;
-  seats: LandmarkPreviewSeat[];
-};
-
-export type LandmarkSeatPreview = {
-  checkedAt: string;
-  rows: LandmarkPreviewRow[];
-  snapshot: SeatSnapshot;
 };
 
 export class LandmarkClient {
@@ -135,11 +100,11 @@ export class LandmarkClient {
     this.sourceOrigins = sourceOrigins ?? getConfiguredSourceOrigins();
   }
 
-  async search(query: SearchQuery): Promise<SearchResult[]> {
+  async search(query: SearchQuery): Promise<SearchCandidate[]> {
     return this.performSearch(query);
   }
 
-  private async performSearch(query: SearchQuery): Promise<SearchResult[]> {
+  private async performSearch(query: SearchQuery): Promise<SearchCandidate[]> {
     const { origin, theatres } = await this.resolveSearchArea(query);
     const searchDates = getValidatedSearchDates(query);
     const maxTheatres = readPositiveInteger(
@@ -204,50 +169,7 @@ export class LandmarkClient {
         ).map((candidate) => [candidate.showtime.id, candidate]),
       ).values(),
     ).slice(0, maxSeatChecks);
-    const results: SearchResult[] = [];
-    let successfulSeatChecks = 0;
-    let lastSeatError: unknown;
-
-    for (
-      let offset = 0;
-      offset < candidates.length;
-      offset += SEAT_CHECK_CONCURRENCY
-    ) {
-      const batch = await Promise.allSettled(
-        candidates
-          .slice(offset, offset + SEAT_CHECK_CONCURRENCY)
-          .map(async (candidate) => ({
-            distanceKm: candidate.distanceKm,
-            showtime: candidate.showtime,
-            snapshot: await this.getSeatSnapshot(
-              candidate.theatre,
-              candidate.showtime,
-            ),
-            theatre: candidate.theatre,
-          })),
-      );
-
-      for (const settled of batch) {
-        if (settled.status === "rejected") {
-          lastSeatError = settled.reason;
-          continue;
-        }
-
-        successfulSeatChecks += 1;
-
-        if (matchesSnapshotFilters(settled.value, query)) {
-          results.push(settled.value);
-        }
-      }
-    }
-
-    if (candidates.length > 0 && successfulSeatChecks === 0) {
-      throw lastSeatError instanceof Error
-        ? lastSeatError
-        : new Error("Landmark seat previews are unavailable.");
-    }
-
-    return sortResults(results, sortBy);
+    return sortResults(candidates, sortBy);
   }
 
   async suggestMovieTitles(
@@ -402,43 +324,6 @@ export class LandmarkClient {
     return dedupeShowtimes(showtimes);
   }
 
-  async getSeatSnapshot(
-    theatre: Theatre,
-    showtime: Showtime,
-  ): Promise<SeatSnapshot> {
-    const preview = await this.getSeatPreview(
-      theatre,
-      showtime.providerShowtimeId,
-    );
-    return preview.snapshot;
-  }
-
-  async getSeatPreview(
-    theatre: Theatre,
-    sessionId: string,
-  ): Promise<LandmarkSeatPreview> {
-    if (!isNumericId(sessionId)) {
-      throw new Error("The Landmark session ID is invalid.");
-    }
-
-    const landmarkTheatre = requireLandmarkTheatre(theatre);
-    const data = await fetchLandmarkSeatMap(landmarkTheatre, sessionId);
-    const records = collectSeatRecords(data);
-
-    if (!records.length) {
-      throw new Error("Landmark returned an empty seat preview.");
-    }
-
-    const checkedAt = new Date();
-    const snapshot = buildSeatSnapshot(records.map(toRawSeat), checkedAt);
-
-    return {
-      checkedAt: checkedAt.toISOString(),
-      rows: buildPreviewRows(records),
-      snapshot,
-    };
-  }
-
   private async resolveSearchArea(
     query: Pick<
       SearchQuery,
@@ -531,40 +416,6 @@ export class LandmarkClient {
       failures,
       `Landmark showtimes are unavailable for ${theatre.name}.`,
     );
-  }
-}
-
-async function fetchLandmarkSeatMap(
-  theatre: LandmarkTheatre,
-  sessionId: string,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-
-  try {
-    const seatMapUrl = new URL(
-      `/api/Seating/GetSessionSeatData/${encodeURIComponent(theatre.providerTheatreId)}/${encodeURIComponent(sessionId)}`,
-      LANDMARK_BOOKING_API_ORIGIN,
-    );
-    const response = await fetch(
-      seatMapUrl,
-      {
-        cache: "no-store",
-        headers: { Accept: "application/json" },
-        signal: controller.signal,
-      },
-    );
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(
-        `Landmark seat preview failed with HTTP ${response.status}: ${body.slice(0, 160)}`,
-      );
-    }
-
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
@@ -898,17 +749,6 @@ function filterShowtimes(
   });
 }
 
-function matchesSnapshotFilters(
-  result: SearchResult,
-  query: SearchQuery,
-): boolean {
-  return (
-    (!query.onlyZeroSold || result.snapshot.occupiedEstimate === 0) &&
-    (!query.maxFiveSold || result.snapshot.occupiedEstimate <= 5) &&
-    (!query.accessibleAvailable || result.snapshot.accessibilityCount > 0)
-  );
-}
-
 function normalizeLandmarkFormat(rawExperiences: string[]): string {
   const formats = new Set<string>();
 
@@ -1026,159 +866,6 @@ function findJsonArrayEnd(value: string, start: number): number {
   throw new Error("Landmark returned an incomplete showtime payload.");
 }
 
-function collectSeatRecords(value: unknown): LandmarkSeatRecord[] {
-  const records = new Map<string, LandmarkSeatRecord>();
-
-  function visit(current: unknown): void {
-    if (Array.isArray(current)) {
-      for (const item of current) {
-        visit(item);
-      }
-
-      return;
-    }
-
-    if (!current || typeof current !== "object") {
-      return;
-    }
-
-    const object = current as LandmarkSeatRecord;
-    const id = toText(object.SeatId) || toText(object.SeatName);
-
-    if (
-      id &&
-      (object.Status !== undefined ||
-        (object.Row !== undefined &&
-          object.Column !== undefined &&
-          object.Type !== undefined))
-    ) {
-      records.set(id, object);
-      return;
-    }
-
-    for (const child of Object.values(object)) {
-      visit(child);
-    }
-  }
-
-  visit(value);
-  return Array.from(records.values());
-}
-
-function toRawSeat(record: LandmarkSeatRecord): RawSeat {
-  return {
-    status: isSeatAvailable(record.Status) ? "available" : "occupied",
-    type: getAccessibilityType(record),
-  };
-}
-
-function buildPreviewRows(
-  records: LandmarkSeatRecord[],
-): LandmarkPreviewRow[] {
-  const rows = new Map<string, LandmarkPreviewSeat[]>();
-
-  records.forEach((record, index) => {
-    const label = toText(record.SeatName) || `Seat ${index + 1}`;
-    const rowLabel = getSeatRowLabel(record, label);
-    const row = rows.get(rowLabel) ?? [];
-    const accessibilityType = getAccessibilityType(record);
-
-    row.push({
-      accessible: Boolean(accessibilityType),
-      column: getSeatColumn(record, label, index),
-      id: toText(record.SeatId) || label,
-      label,
-      status: isSeatAvailable(record.Status) ? "available" : "unavailable",
-    });
-    rows.set(rowLabel, row);
-  });
-
-  return Array.from(rows, ([label, seats]) => ({
-    label,
-    seats: seats.sort(
-      (a, b) => a.column - b.column || a.label.localeCompare(b.label),
-    ),
-  })).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-}
-
-function getAccessibilityType(
-  record: LandmarkSeatRecord,
-): "wheelchair" | "companion" | undefined {
-  const label = toText(record.SeatName).toLowerCase();
-  const details = [
-    record.Type,
-    record.Style,
-    record.SeatType,
-    record.Description,
-  ]
-    .map(toText)
-    .join(" ")
-    .toLowerCase();
-
-  if (/\bwc\d*\b|wheelchair/.test(label) || /wheelchair/.test(details)) {
-    return "wheelchair";
-  }
-
-  if (/companion/.test(label) || /companion/.test(details)) {
-    return "companion";
-  }
-
-  if (Number(record.Type) === 2) {
-    return "wheelchair";
-  }
-
-  if (Number(record.Style) === 4) {
-    return "companion";
-  }
-
-  return undefined;
-}
-
-function isSeatAvailable(status: unknown): boolean {
-  if (status === undefined || status === null || status === "") {
-    return true;
-  }
-
-  const normalized = toText(status).trim().toLowerCase();
-  return normalized === "0" || normalized === "available";
-}
-
-function getSeatRowLabel(
-  record: LandmarkSeatRecord,
-  seatLabel: string,
-): string {
-  const labelRow = seatLabel.includes("-")
-    ? seatLabel.split("-", 1)[0]?.trim()
-    : undefined;
-
-  if (labelRow) {
-    return labelRow;
-  }
-
-  const row = toText(record.Row).trim();
-
-  if (row) {
-    return row;
-  }
-
-  return "Seats";
-}
-
-function getSeatColumn(
-  record: LandmarkSeatRecord,
-  seatLabel: string,
-  fallback: number,
-): number {
-  const explicitColumn = Number(record.Column);
-
-  if (Number.isFinite(explicitColumn)) {
-    return explicitColumn;
-  }
-
-  const labelColumn = Number(seatLabel.match(/(\d+)$/)?.[1]);
-  return Number.isFinite(labelColumn) ? labelColumn : fallback;
-}
-
 function standardUserAgent(): string {
   return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36";
 }
@@ -1243,9 +930,9 @@ function getDistanceFromOrigin(
 }
 
 function sortResults(
-  results: SearchResult[],
+  results: SearchCandidate[],
   sortBy: SortOption,
-): SearchResult[] {
+): SearchCandidate[] {
   return results.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
     const primary = sortBy.startsWith("distance")

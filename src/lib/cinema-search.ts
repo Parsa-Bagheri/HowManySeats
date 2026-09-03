@@ -4,13 +4,13 @@ import type {
   CinemaProvider,
   MovieSuggestion,
   MovieSuggestionQuery,
+  SearchCandidate,
   SearchQuery,
-  SearchResult,
   SortOption,
 } from "./types";
 
 export type CinemaProviderClient = {
-  search(query: SearchQuery): Promise<SearchResult[]>;
+  search(query: SearchQuery): Promise<SearchCandidate[]>;
   suggestMovieTitles(query: MovieSuggestionQuery): Promise<MovieSuggestion[]>;
 };
 
@@ -31,11 +31,11 @@ export class CinemaSearch {
     this.providers = providers;
   }
 
-  async search(query: SearchQuery): Promise<SearchResult[]> {
+  async search(query: SearchQuery): Promise<SearchCandidate[]> {
     const settled = await Promise.allSettled(
       this.providers.map(({ client }) => client.search(query)),
     );
-    const results: SearchResult[] = [];
+    const results: SearchCandidate[] = [];
     const failures: unknown[] = [];
 
     settled.forEach((result, index) => {
@@ -109,9 +109,9 @@ export class CinemaSearch {
 }
 
 function sortResults(
-  results: SearchResult[],
+  results: SearchCandidate[],
   sortBy: SortOption,
-): SearchResult[] {
+): SearchCandidate[] {
   return results.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
     const primary = sortBy.startsWith("distance")

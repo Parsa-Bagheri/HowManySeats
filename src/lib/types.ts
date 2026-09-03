@@ -38,11 +38,15 @@ export type SeatSnapshot = {
   accessibilityCount: number;
 };
 
-export type SearchResult = {
+export type SearchCandidate = {
   theatre: Theatre;
   showtime: Showtime;
-  snapshot: SeatSnapshot;
+  snapshot?: SeatSnapshot;
   distanceKm?: number;
+};
+
+export type SearchResult = SearchCandidate & {
+  snapshot: SeatSnapshot;
 };
 
 export type MovieSuggestion = {

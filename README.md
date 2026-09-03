@@ -41,8 +41,9 @@ GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availa
 ```
 
 The Landmark client reads the embedded showtime data from each public theater
-page through Jina Reader's plain HTTP engine. It gets seat availability from
-Landmark's public booking API:
+page through Jina Reader's plain HTTP engine. After the server returns matching
+showtimes, the visitor's browser gets seat availability from Landmark's public
+booking API:
 
 ```text
 GET /showtimes/{theatreSlug}
@@ -51,9 +52,9 @@ GET https://bookingapi.landmarkcinemas.com/api/Seating/GetSessionSeatData/{cinem
 
 The client keeps parsed theater pages in a bounded 60-second cache. Jina Reader
 also caches the public page, which avoids repeated page downloads. Seat-map
-requests go directly to the first-party JSON API and don't launch a browser. A
-Jina API key is optional for development and raises the service's rate limit
-for production traffic.
+requests go directly from the visitor to the first-party JSON API. The app
+doesn't launch an automated browser. A Jina API key is optional for development
+and raises the service's rate limit for production traffic.
 
 Landmark opens seat previews in a modal instead of providing a standalone
 preview URL. HowManySeats provides a read-only preview page and links each
