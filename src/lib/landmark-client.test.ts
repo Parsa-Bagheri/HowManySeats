@@ -145,10 +145,9 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
   assert.equal(previewUrl.searchParams.get("sessionId"), "11567088");
 });
 
-test("posts Landmark anti-forgery data and normalizes its seat map", async (t) => {
+test("gets Landmark booking API data and normalizes its seat map", async (t) => {
   const originalFetch = globalThis.fetch;
-  let postedBody: unknown;
-  let postedHeaders: Headers | undefined;
+  let seatRequest: { headers: Headers; method?: string } | undefined;
 
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -156,34 +155,27 @@ test("posts Landmark anti-forgery data and normalizes its seat map", async (t) =
   globalThis.fetch = async (input, init) => {
     const url = String(input);
 
-    if (url === `${sourceOrigin}/showtimes/waterloo`) {
-      return new Response(showtimePage([]), {
-        headers: { "Set-Cookie": "LandmarkSession=abc; Path=/; HttpOnly" },
-      });
-    }
-
     if (
       url ===
-      `${sourceOrigin}/Umbraco/Api/SeatMapApi/GetSessionSeatMap`
+      "https://bookingapi.landmarkcinemas.com/api/Seating/GetSessionSeatData/200/11567088"
     ) {
-      postedBody = JSON.parse(String(init?.body));
-      postedHeaders = new Headers(init?.headers);
+      seatRequest = {
+        headers: new Headers(init?.headers),
+        method: init?.method,
+      };
       return Response.json({
-        Data: {
-          Area: {
-            Rows: [
-              {
-                Seats: [
-                  { Column: 1, Row: "A", SeatId: "A1", SeatName: "A-1", Status: 0, Type: 1 },
-                  { Column: 2, Row: "A", SeatId: "A2", SeatName: "A-2", Status: 1, Type: 1 },
-                  { Column: 3, Row: "A", SeatId: "WC1", SeatName: "A-WC1", Status: 0, Type: 2 },
-                  { Column: 4, Row: "A", SeatId: "C1", SeatName: "A-4", Status: 0, Style: 4, Type: 1 },
-                ],
-              },
-            ],
-          },
+        Area: {
+          Rows: [
+            {
+              Seats: [
+                { Column: 1, Row: "A", SeatId: "A1", SeatName: "A-1", Type: 1 },
+                { Column: 2, Row: "A", SeatId: "A2", SeatName: "A-2", Status: 1, Type: 1 },
+                { Column: 3, Row: "A", SeatId: "WC1", SeatName: "A-WC1", Type: 2 },
+                { Column: 4, Row: "A", SeatId: "C1", SeatName: "A-4", Style: 4, Type: 1 },
+              ],
+            },
+          ],
         },
-        ResultCode: 0,
       });
     }
 
@@ -193,16 +185,10 @@ test("posts Landmark anti-forgery data and normalizes its seat map", async (t) =
   const preview = await new LandmarkClient([sourceOrigin]).getSeatPreview(
     waterloo,
     "11567088",
-    "181815",
   );
 
-  assert.deepEqual(postedBody, {
-    CinemaId: "200",
-    ExternalSessionId: "181815",
-    SessionId: "11567088",
-  });
-  assert.equal(postedHeaders?.get("cookie"), "LandmarkSession=abc");
-  assert.equal(postedHeaders?.get("x-xsrf-token"), "token&part");
+  assert.equal(seatRequest?.method, undefined);
+  assert.equal(seatRequest?.headers.get("accept"), "application/json");
   assert.equal(preview.snapshot.sellableSeats, 2);
   assert.equal(preview.snapshot.occupiedEstimate, 1);
   assert.equal(preview.snapshot.accessibilityCount, 2);
@@ -256,29 +242,19 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
 
     if (
       url ===
-      "https://www.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap"
-    ) {
-      seatRequests.push(url);
-      return new Response("Access denied", { status: 403 });
-    }
-
-    if (
-      url ===
-      "https://web5.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap"
+      "https://bookingapi.landmarkcinemas.com/api/Seating/GetSessionSeatData/200/11567088"
     ) {
       seatRequests.push(url);
       return Response.json({
-        Data: {
-          Seats: [
-            {
-              SeatId: "A1",
-              SeatName: "A-1",
-              Status: 0,
-              Type: 1,
-            },
-          ],
-        },
-        ResultCode: 0,
+        Seats: [
+          {
+            Column: 1,
+            Row: 1,
+            SeatId: "A1",
+            SeatName: "A-1",
+            Type: 1,
+          },
+        ],
       });
     }
 
@@ -298,7 +274,6 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   const preview = await secondClient.getSeatPreview(
     waterloo,
     "11567088",
-    "181815",
   );
 
   assert.equal(readerRequests, 1);
@@ -309,8 +284,7 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   assert.equal(secondShowtimes.length, 1);
   assert.equal(preview.snapshot.sellableSeats, 1);
   assert.deepEqual(seatRequests, [
-    "https://www.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap",
-    "https://web5.landmarkcinemas.com/Umbraco/Api/SeatMapApi/GetSessionSeatMap",
+    "https://bookingapi.landmarkcinemas.com/api/Seating/GetSessionSeatData/200/11567088",
   ]);
 });
 

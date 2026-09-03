@@ -76,7 +76,6 @@ export default async function LandmarkSeatPreviewPage({
     preview = await new LandmarkClient().getSeatPreview(
       theatre,
       parsed.data.sessionId,
-      parsed.data.externalSessionId,
     );
   } catch (error) {
     previewError = true;

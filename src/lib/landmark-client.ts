@@ -25,6 +25,8 @@ import type {
 } from "./types";
 
 const LANDMARK_PUBLIC_ORIGIN = "https://www.landmarkcinemas.com";
+const LANDMARK_BOOKING_API_ORIGIN =
+  "https://bookingapi.landmarkcinemas.com";
 const DEFAULT_SOURCE_ORIGINS = [
   LANDMARK_PUBLIC_ORIGIN,
   "https://web5.landmarkcinemas.com",
@@ -75,10 +77,7 @@ export type LandmarkMovie = {
 };
 
 type LandmarkPageContext = {
-  cookieHeader: string;
   movies: LandmarkMovie[];
-  origin: string;
-  token: string;
 };
 
 type CachedLandmarkPage = {
@@ -96,12 +95,6 @@ type LandmarkSeatRecord = Record<string, unknown> & {
   Status?: number | string;
   Style?: number | string;
   Type?: number | string;
-};
-
-type LandmarkSeatMapResponse = {
-  Data?: unknown;
-  ResultCode?: number | string;
-  ResultMessage?: string;
 };
 
 type ShowtimeCandidate = {
@@ -416,7 +409,6 @@ export class LandmarkClient {
     const preview = await this.getSeatPreview(
       theatre,
       showtime.providerShowtimeId,
-      getExternalSessionId(showtime.purchaseUrl),
     );
     return preview.snapshot;
   }
@@ -424,29 +416,14 @@ export class LandmarkClient {
   async getSeatPreview(
     theatre: Theatre,
     sessionId: string,
-    externalSessionId?: string,
   ): Promise<LandmarkSeatPreview> {
     if (!isNumericId(sessionId)) {
       throw new Error("The Landmark session ID is invalid.");
     }
 
     const landmarkTheatre = requireLandmarkTheatre(theatre);
-    const context = await this.getTheatrePage(landmarkTheatre);
-
-    const data = await this.getSeatMapData(
-      context,
-      landmarkTheatre,
-      sessionId,
-      externalSessionId,
-    );
-
-    if (Number(data.ResultCode) !== 0 || data.Data === undefined) {
-      throw new Error(
-        data.ResultMessage?.trim() || "Landmark disabled this seat preview.",
-      );
-    }
-
-    const records = collectSeatRecords(data.Data);
+    const data = await fetchLandmarkSeatMap(landmarkTheatre, sessionId);
+    const records = collectSeatRecords(data);
 
     if (!records.length) {
       throw new Error("Landmark returned an empty seat preview.");
@@ -460,41 +437,6 @@ export class LandmarkClient {
       rows: buildPreviewRows(records),
       snapshot,
     };
-  }
-
-  private async getSeatMapData(
-    context: LandmarkPageContext,
-    theatre: LandmarkTheatre,
-    sessionId: string,
-    externalSessionId?: string,
-  ): Promise<LandmarkSeatMapResponse> {
-    if (!externalSessionId || !isNumericId(externalSessionId)) {
-      throw new Error("The Landmark external session ID is invalid.");
-    }
-
-    const origins = Array.from(
-      new Set([context.origin, ...this.sourceOrigins, LANDMARK_PUBLIC_ORIGIN]),
-    );
-    const failures: unknown[] = [];
-
-    for (const origin of origins) {
-      try {
-        return await fetchLandmarkSeatMap({
-          context,
-          externalSessionId,
-          origin,
-          sessionId,
-          theatre,
-        });
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-
-    throw new AggregateError(
-      failures,
-      "Landmark seat previews are unavailable.",
-    );
   }
 
   private async resolveSearchArea(
@@ -592,48 +534,23 @@ export class LandmarkClient {
   }
 }
 
-async function fetchLandmarkSeatMap({
-  context,
-  externalSessionId,
-  origin,
-  sessionId,
-  theatre,
-}: {
-  context: LandmarkPageContext;
-  externalSessionId: string;
-  origin: string;
-  sessionId: string;
-  theatre: LandmarkTheatre;
-}): Promise<LandmarkSeatMapResponse> {
+async function fetchLandmarkSeatMap(
+  theatre: LandmarkTheatre,
+  sessionId: string,
+): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
-  const headers = new Headers({
-    Accept: "application/json, text/javascript, */*; q=0.01",
-    "Accept-Language": "en-CA,en;q=0.9",
-    "Content-Type": "application/json; charset=UTF-8",
-    Origin: origin,
-    Referer: `${origin}/showtimes/${theatre.slug}`,
-    "User-Agent": browserUserAgent(),
-    "X-Requested-With": "XMLHttpRequest",
-    "X-XSRF-TOKEN": context.token,
-  });
-
-  if (context.cookieHeader && origin === context.origin) {
-    headers.set("Cookie", context.cookieHeader);
-  }
 
   try {
+    const seatMapUrl = new URL(
+      `/api/Seating/GetSessionSeatData/${encodeURIComponent(theatre.providerTheatreId)}/${encodeURIComponent(sessionId)}`,
+      LANDMARK_BOOKING_API_ORIGIN,
+    );
     const response = await fetch(
-      `${origin}/Umbraco/Api/SeatMapApi/GetSessionSeatMap`,
+      seatMapUrl,
       {
-        body: JSON.stringify({
-          CinemaId: theatre.providerTheatreId,
-          ExternalSessionId: externalSessionId,
-          SessionId: sessionId,
-        }),
         cache: "no-store",
-        headers,
-        method: "POST",
+        headers: { Accept: "application/json" },
         signal: controller.signal,
       },
     );
@@ -645,7 +562,7 @@ async function fetchLandmarkSeatMap({
       );
     }
 
-    return (await response.json()) as LandmarkSeatMapResponse;
+    return response.json();
   } finally {
     clearTimeout(timeout);
   }
@@ -675,7 +592,7 @@ async function fetchLandmarkReaderPage(
 
   const value = fetchLandmarkPageResponse(readerUrl, {
     headers: buildReaderHeaders(cacheSeconds),
-  }).then(({ html }) => parseLandmarkPage(html, LANDMARK_PUBLIC_ORIGIN, ""));
+  }).then(parseLandmarkPage);
   const entry = {
     expiresAt: now + cacheSeconds * 1_000,
     value,
@@ -704,22 +621,22 @@ async function fetchLandmarkOriginPage(
   theatre: LandmarkTheatre,
 ): Promise<LandmarkPageContext> {
   const url = `${origin}/showtimes/${encodeURIComponent(theatre.slug)}`;
-  const { headers, html } = await fetchLandmarkPageResponse(url, {
+  const html = await fetchLandmarkPageResponse(url, {
     headers: {
       Accept:
         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "Accept-Language": "en-CA,en;q=0.9",
-      "User-Agent": browserUserAgent(),
+      "User-Agent": standardUserAgent(),
     },
   });
 
-  return parseLandmarkPage(html, origin, extractCookieHeader(headers));
+  return parseLandmarkPage(html);
 }
 
 async function fetchLandmarkPageResponse(
   url: string,
   init: Pick<RequestInit, "headers">,
-): Promise<{ headers: Headers; html: string }> {
+): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
 
@@ -736,31 +653,15 @@ async function fetchLandmarkPageResponse(
       );
     }
 
-    return {
-      headers: response.headers,
-      html: await response.text(),
-    };
+    return response.text();
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function parseLandmarkPage(
-  html: string,
-  origin: string,
-  cookieHeader: string,
-): LandmarkPageContext {
-  const token = extractAntiForgeryToken(html);
-
-  if (!token) {
-    throw new Error("Landmark did not include its anti-forgery token.");
-  }
-
+function parseLandmarkPage(html: string): LandmarkPageContext {
   return {
-    cookieHeader,
     movies: extractLandmarkMovies(html),
-    origin,
-    token,
   };
 }
 
@@ -1089,18 +990,6 @@ function buildLandmarkSeatPreviewUrl({
   return `/landmark-seat-preview?${params}`;
 }
 
-function getExternalSessionId(purchaseUrl: string | undefined): string | undefined {
-  if (!purchaseUrl) {
-    return undefined;
-  }
-
-  try {
-    return toId(new URL(purchaseUrl).searchParams.get("externalSessionId"));
-  } catch {
-    return undefined;
-  }
-}
-
 function findJsonArrayEnd(value: string, start: number): number {
   let depth = 0;
   let escaped = false;
@@ -1137,49 +1026,6 @@ function findJsonArrayEnd(value: string, start: number): number {
   throw new Error("Landmark returned an incomplete showtime payload.");
 }
 
-function extractAntiForgeryToken(html: string): string | undefined {
-  const input = html.match(
-    /<input\b[^>]*\bid=["']AntiForgeryToken["'][^>]*>/i,
-  )?.[0];
-  const value = input?.match(/\bvalue=["']([^"']+)["']/i)?.[1];
-  return value ? decodeHtmlEntities(value) : undefined;
-}
-
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&amp;/gi, "&")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([\da-f]+);/gi, (_, code: string) =>
-      String.fromCodePoint(Number.parseInt(code, 16)),
-    );
-}
-
-function extractCookieHeader(headers: Headers): string {
-  const headersWithCookies = headers as Headers & {
-    getSetCookie?: () => string[];
-  };
-  const values =
-    headersWithCookies.getSetCookie?.() ??
-    splitSetCookieHeader(headers.get("set-cookie"));
-
-  return values
-    .map((value) => value.split(";", 1)[0]?.trim())
-    .filter(Boolean)
-    .join("; ");
-}
-
-function splitSetCookieHeader(value: string | null): string[] {
-  if (!value) {
-    return [];
-  }
-
-  return value.split(/,(?=\s*[^;,=\s]+=[^;,]*)/);
-}
-
 function collectSeatRecords(value: unknown): LandmarkSeatRecord[] {
   const records = new Map<string, LandmarkSeatRecord>();
 
@@ -1199,7 +1045,13 @@ function collectSeatRecords(value: unknown): LandmarkSeatRecord[] {
     const object = current as LandmarkSeatRecord;
     const id = toText(object.SeatId) || toText(object.SeatName);
 
-    if (id && object.Status !== undefined) {
+    if (
+      id &&
+      (object.Status !== undefined ||
+        (object.Row !== undefined &&
+          object.Column !== undefined &&
+          object.Type !== undefined))
+    ) {
       records.set(id, object);
       return;
     }
@@ -1283,6 +1135,10 @@ function getAccessibilityType(
 }
 
 function isSeatAvailable(status: unknown): boolean {
+  if (status === undefined || status === null || status === "") {
+    return true;
+  }
+
   const normalized = toText(status).trim().toLowerCase();
   return normalized === "0" || normalized === "available";
 }
@@ -1323,7 +1179,7 @@ function getSeatColumn(
   return Number.isFinite(labelColumn) ? labelColumn : fallback;
 }
 
-function browserUserAgent(): string {
+function standardUserAgent(): string {
   return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36";
 }
 
