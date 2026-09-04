@@ -114,10 +114,16 @@ export class LandmarkClient {
       selectedTheatres.length > 0 &&
       showtimeSettled.every((result) => result.status === "rejected")
     ) {
+      const failures = showtimeSettled.flatMap((result) =>
+        result.status === "rejected" ? [result.reason] : [],
+      );
+
+      for (const failure of failures) {
+        console.error("Landmark theatre request failed", failure);
+      }
+
       throw new AggregateError(
-        showtimeSettled
-          .filter((result) => result.status === "rejected")
-          .map((result) => result.reason),
+        failures,
         "Landmark showtimes are unavailable.",
       );
     }

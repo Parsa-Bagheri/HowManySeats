@@ -8,7 +8,7 @@ import {
 } from "@/lib/search-request";
 
 export const maxDuration = 60;
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 const suggestionSchema = searchAreaSchema.extend({
   query: z.string().min(2).max(120),
