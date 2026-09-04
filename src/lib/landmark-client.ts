@@ -23,16 +23,13 @@ import type {
 } from "./types";
 
 const LANDMARK_PUBLIC_ORIGIN = "https://www.landmarkcinemas.com";
-const DEFAULT_SOURCE_ORIGINS = [
-  LANDMARK_PUBLIC_ORIGIN,
-  "https://web5.landmarkcinemas.com",
-];
-const LANDMARK_READER_ORIGIN = "https://r.jina.ai";
-const DEFAULT_READER_CACHE_SECONDS = 60;
-const MAX_READER_CACHE_SECONDS = 300;
-const MAX_READER_CACHE_ENTRIES = 16;
+const LANDMARK_MOVIE_API_ORIGIN = "https://movieapi.landmarkcinemas.com";
+const LANDMARK_CIRCUIT_ID = "22";
+const DEFAULT_MOVIE_CACHE_SECONDS = 60;
+const MAX_MOVIE_CACHE_SECONDS = 300;
+const MAX_MOVIE_CACHE_ENTRIES = 16;
 const MAX_SUGGESTION_THEATRES = 8;
-const SOURCE_TIMEOUT_MS = 10_000;
+const SOURCE_TIMEOUT_MS = 15_000;
 
 type LandmarkExperience = {
   Description?: string;
@@ -63,6 +60,7 @@ type LandmarkExperienceGroup = {
 type LandmarkSession = {
   ExperienceTypes?: LandmarkExperienceGroup[];
   NewDate?: string;
+  Times?: LandmarkShowtimeTime[];
 };
 
 export type LandmarkMovie = {
@@ -71,16 +69,12 @@ export type LandmarkMovie = {
   Title?: string;
 };
 
-type LandmarkPageContext = {
-  movies: LandmarkMovie[];
-};
-
-type CachedLandmarkPage = {
+type CachedLandmarkMovies = {
   expiresAt: number;
-  value: Promise<LandmarkPageContext>;
+  value: Promise<LandmarkMovie[]>;
 };
 
-const readerPageCache = new Map<string, CachedLandmarkPage>();
+const sharedMovieCache = new Map<string, CachedLandmarkMovies>();
 
 type ShowtimeCandidate = {
   distanceKm?: number;
@@ -89,18 +83,18 @@ type ShowtimeCandidate = {
 };
 
 export class LandmarkClient {
-  private readonly pageCache = new Map<
+  private readonly requestMovieCache = new Map<
     string,
-    Promise<LandmarkPageContext>
+    Promise<LandmarkMovie[]>
   >();
-  private readonly sourceOrigins: readonly string[];
+  private readonly movieApiOrigin: string;
   private readonly now: () => Date;
 
   constructor(
-    sourceOrigins?: readonly string[],
+    movieApiOrigin = LANDMARK_MOVIE_API_ORIGIN,
     now: () => Date = () => new Date(),
   ) {
-    this.sourceOrigins = sourceOrigins ?? getConfiguredSourceOrigins();
+    this.movieApiOrigin = movieApiOrigin.replace(/\/$/, "");
     this.now = now;
   }
 
@@ -255,7 +249,7 @@ export class LandmarkClient {
 
   async getShowtimes(theatre: Theatre, date: string): Promise<Showtime[]> {
     const landmarkTheatre = requireLandmarkTheatre(theatre);
-    const { movies } = await this.getTheatrePage(landmarkTheatre);
+    const movies = await this.getTheatreMovies(landmarkTheatre);
     const showtimes: Showtime[] = [];
 
     for (const movie of movies) {
@@ -271,60 +265,72 @@ export class LandmarkClient {
           continue;
         }
 
-        for (const experienceGroup of session.ExperienceTypes ?? []) {
-          for (const time of experienceGroup.Times ?? []) {
-            const cinemaId = toId(time.CinemaId);
-            const externalSessionId = toId(time.ExternalSessionId);
-            const sessionId = toId(time.Scheduleid);
-            const startsAt = time.StartTime
-              ? localDateTimeToIso(date, time.StartTime, landmarkTheatre.timeZone)
-              : undefined;
+        const sessionTimes = [
+          ...(session.Times ?? []).map((time) => ({
+            fallbackExperiences: [] as LandmarkExperience[],
+            time,
+          })),
+          ...(session.ExperienceTypes ?? []).flatMap(
+            (experienceGroup) =>
+              (experienceGroup.Times ?? []).map((time) => ({
+                fallbackExperiences:
+                  experienceGroup.ExperienceAttributes ?? [],
+                time,
+              })),
+          ),
+        ];
 
-            if (
-              cinemaId !== landmarkTheatre.providerTheatreId ||
-              !externalSessionId ||
-              !sessionId ||
-              !startsAt ||
-              time.SoldOut ||
-              time.SessionExpired
-            ) {
-              continue;
-            }
+        for (const { fallbackExperiences, time } of sessionTimes) {
+          const cinemaId = toId(time.CinemaId);
+          const externalSessionId = toId(time.ExternalSessionId);
+          const sessionId = toId(time.Scheduleid);
+          const startsAt = time.StartTime
+            ? localDateTimeToIso(date, time.StartTime, landmarkTheatre.timeZone)
+            : undefined;
 
-            const experiences =
-              time.Experience?.length
-                ? time.Experience
-                : (experienceGroup.ExperienceAttributes ?? []);
-            const format = normalizeLandmarkFormat(
-              experiences.map(
-                (experience) =>
-                  experience.Name ?? experience.Description ?? "",
-              ),
-            );
-
-            const bookingUrl = buildLandmarkPurchaseUrl({
-              cinemaId,
-              externalSessionId,
-              filmId,
-              sessionId,
-            });
-
-            if (!bookingUrl) {
-              continue;
-            }
-
-            showtimes.push({
-              auditorium: time.Screen?.trim() || undefined,
-              format,
-              id: `landmark-${cinemaId}-${sessionId}`,
-              movieTitle,
-              providerShowtimeId: sessionId,
-              purchaseUrl: bookingUrl,
-              seatPreviewUrl: bookingUrl,
-              startsAt,
-              theatreId: landmarkTheatre.id,
-            });
+          if (
+            cinemaId !== landmarkTheatre.providerTheatreId ||
+            !externalSessionId ||
+            !sessionId ||
+            !startsAt ||
+            time.SoldOut ||
+            time.SessionExpired
+          ) {
+            continue;
           }
+
+          const experiences = time.Experience?.length
+            ? time.Experience
+            : fallbackExperiences;
+          const format = normalizeLandmarkFormat(
+            experiences.map(
+              (experience) =>
+                experience.Name ?? experience.Description ?? "",
+            ),
+          );
+
+          const bookingUrl = buildLandmarkPurchaseUrl({
+            cinemaId,
+            externalSessionId,
+            filmId,
+            sessionId,
+          });
+
+          if (!bookingUrl) {
+            continue;
+          }
+
+          showtimes.push({
+            auditorium: time.Screen?.trim() || undefined,
+            format,
+            id: `landmark-${cinemaId}-${sessionId}`,
+            movieTitle,
+            providerShowtimeId: sessionId,
+            purchaseUrl: bookingUrl,
+            seatPreviewUrl: bookingUrl,
+            startsAt,
+            theatreId: landmarkTheatre.id,
+          });
         }
       }
     }
@@ -375,207 +381,115 @@ export class LandmarkClient {
     };
   }
 
-  private getTheatrePage(
+  private getTheatreMovies(
     theatre: LandmarkTheatre,
-  ): Promise<LandmarkPageContext> {
-    const cached = this.pageCache.get(theatre.slug);
+  ): Promise<LandmarkMovie[]> {
+    const cached = this.requestMovieCache.get(theatre.slug);
 
     if (cached) {
       return cached;
     }
 
-    const pending = this.fetchTheatrePage(theatre);
-    this.pageCache.set(theatre.slug, pending);
+    const pending = fetchLandmarkMovies(this.movieApiOrigin, theatre);
+    this.requestMovieCache.set(theatre.slug, pending);
     return pending;
-  }
-
-  private async fetchTheatrePage(
-    theatre: LandmarkTheatre,
-  ): Promise<LandmarkPageContext> {
-    const failures: unknown[] = [];
-
-    try {
-      return await fetchLandmarkReaderPage(theatre);
-    } catch (error) {
-      failures.push(error);
-    }
-
-    try {
-      return await Promise.any(
-        this.sourceOrigins.map((origin) =>
-          fetchLandmarkOriginPage(origin, theatre),
-        ),
-      );
-    } catch (error) {
-      failures.push(
-        ...(error instanceof AggregateError ? error.errors : [error]),
-      );
-    }
-
-    throw new AggregateError(
-      failures,
-      `Landmark showtimes are unavailable for ${theatre.name}.`,
-    );
   }
 }
 
-async function fetchLandmarkReaderPage(
+async function fetchLandmarkMovies(
+  movieApiOrigin: string,
   theatre: LandmarkTheatre,
-): Promise<LandmarkPageContext> {
+): Promise<LandmarkMovie[]> {
   const cacheSeconds = readPositiveInteger(
-    process.env.LANDMARK_READER_CACHE_SECONDS,
-    DEFAULT_READER_CACHE_SECONDS,
-    MAX_READER_CACHE_SECONDS,
+    process.env.LANDMARK_MOVIE_CACHE_SECONDS,
+    DEFAULT_MOVIE_CACHE_SECONDS,
+    MAX_MOVIE_CACHE_SECONDS,
   );
-  const targetUrl = new URL(
-    `/showtimes/${encodeURIComponent(theatre.slug)}`,
-    LANDMARK_PUBLIC_ORIGIN,
+  const movieUrl = new URL(
+    `/movies/${LANDMARK_CIRCUIT_ID}/${encodeURIComponent(theatre.providerTheatreId)}`,
+    movieApiOrigin,
   ).toString();
-  const readerUrl = `${LANDMARK_READER_ORIGIN}/${targetUrl}`;
   const now = Date.now();
 
-  pruneReaderPageCache(now);
-  const cached = readerPageCache.get(readerUrl);
+  pruneMovieCache(now);
+  const cached = sharedMovieCache.get(movieUrl);
 
   if (cached && cached.expiresAt > now) {
     return cached.value;
   }
 
-  const value = fetchLandmarkPageResponse(readerUrl, {
-    headers: buildReaderHeaders(),
-  }).then(parseLandmarkPage);
+  const value = fetchLandmarkMovieResponse(movieUrl);
   const entry = {
     expiresAt: now + cacheSeconds * 1_000,
     value,
   };
 
-  if (readerPageCache.size >= MAX_READER_CACHE_ENTRIES) {
-    const oldestKey = readerPageCache.keys().next().value;
+  if (sharedMovieCache.size >= MAX_MOVIE_CACHE_ENTRIES) {
+    const oldestKey = sharedMovieCache.keys().next().value;
 
     if (oldestKey) {
-      readerPageCache.delete(oldestKey);
+      sharedMovieCache.delete(oldestKey);
     }
   }
 
-  readerPageCache.set(readerUrl, entry);
+  sharedMovieCache.set(movieUrl, entry);
   void value.catch(() => {
-    if (readerPageCache.get(readerUrl) === entry) {
-      readerPageCache.delete(readerUrl);
+    if (sharedMovieCache.get(movieUrl) === entry) {
+      sharedMovieCache.delete(movieUrl);
     }
   });
 
   return value;
 }
 
-async function fetchLandmarkOriginPage(
-  origin: string,
-  theatre: LandmarkTheatre,
-): Promise<LandmarkPageContext> {
-  const url = `${origin}/showtimes/${encodeURIComponent(theatre.slug)}`;
-  const html = await fetchLandmarkPageResponse(url, {
-    headers: {
-      Accept:
-        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-CA,en;q=0.9",
-      "User-Agent": standardUserAgent(),
-    },
-  });
-
-  return parseLandmarkPage(html);
-}
-
-async function fetchLandmarkPageResponse(
+async function fetchLandmarkMovieResponse(
   url: string,
-  init: Pick<RequestInit, "headers">,
-): Promise<string> {
+): Promise<LandmarkMovie[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
 
   try {
     const response = await fetch(url, {
       cache: "no-store",
-      headers: init.headers,
+      headers: {
+        Accept: "application/json",
+        "Accept-Language": "en-CA,en;q=0.9",
+        Origin: LANDMARK_PUBLIC_ORIGIN,
+        Referer: `${LANDMARK_PUBLIC_ORIGIN}/`,
+        "User-Agent": standardUserAgent(),
+      },
       signal: controller.signal,
     });
 
     if (!response.ok) {
       throw new Error(
-        `Landmark showtimes failed with HTTP ${response.status}.`,
+        `Landmark movie API failed with HTTP ${response.status}.`,
       );
     }
 
-    return response.text();
+    return parseLandmarkMovies(await response.json());
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function parseLandmarkPage(html: string): LandmarkPageContext {
-  return {
-    movies: extractLandmarkMovies(html),
-  };
-}
-
-function buildReaderHeaders(): Headers {
-  const headers = new Headers({
-    Accept: "text/html",
-    "X-Respond-With": "html",
-  });
-  const apiKey = process.env.JINA_API_KEY?.trim();
-
-  if (apiKey) {
-    headers.set("Authorization", `Bearer ${apiKey}`);
-  }
-
-  return headers;
-}
-
-function pruneReaderPageCache(now: number): void {
-  for (const [key, cached] of readerPageCache) {
+function pruneMovieCache(now: number): void {
+  for (const [key, cached] of sharedMovieCache) {
     if (cached.expiresAt <= now) {
-      readerPageCache.delete(key);
+      sharedMovieCache.delete(key);
     }
   }
 }
 
-export function extractLandmarkMovies(html: string): LandmarkMovie[] {
-  const sectionMatch = /(?:["']nowbooking["']|nowbooking)\s*:\s*\{/i.exec(
-    html,
+export function parseLandmarkMovies(value: unknown): LandmarkMovie[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Landmark returned invalid movie data.");
+  }
+
+  return value.filter(
+    (movie): movie is LandmarkMovie =>
+      typeof movie === "object" && movie !== null,
   );
-
-  if (!sectionMatch) {
-    throw new Error("Landmark did not include its showtime data.");
-  }
-
-  const sectionStart = sectionMatch.index + sectionMatch[0].length;
-  const zeroMatch = /["']0["']\s*:\s*/.exec(html.slice(sectionStart));
-
-  if (!zeroMatch) {
-    throw new Error("Landmark did not include its current movies.");
-  }
-
-  const searchStart = sectionStart + zeroMatch.index + zeroMatch[0].length;
-  const arrayStart = html.indexOf("[", searchStart);
-
-  if (arrayStart < 0) {
-    throw new Error("Landmark returned malformed showtime data.");
-  }
-
-  const arrayEnd = findJsonArrayEnd(html, arrayStart);
-
-  try {
-    const parsed = JSON.parse(html.slice(arrayStart, arrayEnd));
-
-    if (!Array.isArray(parsed)) {
-      throw new Error("The movie payload is not an array.");
-    }
-
-    return parsed as LandmarkMovie[];
-  } catch (error) {
-    throw new Error("Landmark returned invalid showtime data.", {
-      cause: error,
-    });
-  }
 }
 
 export function buildLandmarkPurchaseUrl({
@@ -599,25 +513,6 @@ export function buildLandmarkPurchaseUrl({
   url.searchParams.set("externalSessionId", externalSessionId);
   url.searchParams.set("sessionId", sessionId);
   return url.toString();
-}
-
-function getConfiguredSourceOrigins(): string[] {
-  const configured = process.env.LANDMARK_SOURCE_ORIGIN?.trim();
-
-  if (!configured) {
-    return DEFAULT_SOURCE_ORIGINS;
-  }
-
-  const origins = Array.from(
-    new Set(
-      configured
-        .split(",")
-        .map((origin) => origin.trim().replace(/\/$/, ""))
-        .filter((origin) => /^https:\/\//i.test(origin)),
-    ),
-  );
-
-  return origins.length > 0 ? origins : DEFAULT_SOURCE_ORIGINS;
 }
 
 function requireLandmarkTheatre(theatre: Theatre): LandmarkTheatre {
@@ -747,42 +642,6 @@ function normalizeLandmarkFormat(rawExperiences: string[]): string {
   }
 
   return Array.from(formats).join(", ");
-}
-
-function findJsonArrayEnd(value: string, start: number): number {
-  let depth = 0;
-  let escaped = false;
-  let inString = false;
-
-  for (let index = start; index < value.length; index += 1) {
-    const character = value[index];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === "\\") {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-    } else if (character === "[") {
-      depth += 1;
-    } else if (character === "]") {
-      depth -= 1;
-
-      if (depth === 0) {
-        return index + 1;
-      }
-    }
-  }
-
-  throw new Error("Landmark returned an incomplete showtime payload.");
 }
 
 function standardUserAgent(): string {

@@ -42,21 +42,18 @@ GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout
 GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true
 ```
 
-The Landmark client reads the embedded showtime data from each public theater
-page through Jina Reader's raw HTML response. If that request fails, it tries
-the official page directly. After the server returns matching showtimes, the
-visitor's browser gets seat availability from Landmark's public booking API:
+The Landmark client gets the complete movie and session payload from Landmark's
+public movie API. After the server returns matching showtimes, the visitor's
+browser gets seat availability from Landmark's public booking API:
 
 ```text
-GET /showtimes/{theatreSlug}
+GET https://movieapi.landmarkcinemas.com/movies/22/{cinemaId}
 GET https://bookingapi.landmarkcinemas.com/api/Seating/GetSessionSeatData/{cinemaId}/{sessionId}
 ```
 
-The client keeps parsed theater pages in a bounded 60-second cache. Jina Reader
-also caches the public page, which avoids repeated page downloads. Seat-map
-requests go directly from the visitor to the first-party JSON API. The app
-doesn't launch an automated browser. A Jina API key is optional for development
-and raises the service's rate limit for production traffic.
+The client keeps movie payloads in a bounded 60-second cache. Seat-map requests
+go directly from the visitor to the first-party JSON API. The app doesn't launch
+an automated browser or use an HTML reader.
 
 Landmark provides its seat preview inside the official booking page instead of
 at a standalone URL. Both Landmark actions open that official page. Select
@@ -99,9 +96,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | --- | --- |
 | `CINEPLEX_APIM_SUBSCRIPTION_KEY` | Optional override for the public Cineplex site API key used by the server |
 | `CINEPLEX_MAX_THEATRES_PER_SEARCH` | Maximum nearby theaters inspected per search; defaults to `5` |
-| `JINA_API_KEY` | Optional server-side Jina Reader key for a higher Landmark page-fetch rate limit |
-| `LANDMARK_SOURCE_ORIGIN` | Optional comma-separated list of official Landmark source origins |
-| `LANDMARK_READER_CACHE_SECONDS` | Maximum age for cached Landmark theater pages; defaults to `60` and is capped at `300` |
+| `LANDMARK_MOVIE_CACHE_SECONDS` | Maximum age for cached Landmark movie payloads; defaults to `60` and is capped at `300` |
 | `LANDMARK_MAX_THEATRES_PER_SEARCH` | Maximum nearby Landmark theaters inspected per search; defaults to `5` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Optional browser-restricted key for Google Maps address suggestions |
 

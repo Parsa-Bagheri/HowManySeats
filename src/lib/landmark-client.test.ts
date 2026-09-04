@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildLandmarkPurchaseUrl,
-  extractLandmarkMovies,
   LandmarkClient,
+  parseLandmarkMovies,
   type LandmarkMovie,
 } from "./landmark-client";
 import {
@@ -21,14 +21,14 @@ if (!waterloo || !brandon) {
   throw new Error("A Landmark theatre fixture is missing.");
 }
 
-test("extracts Landmark movies from the embedded showtime payload", () => {
+test("validates Landmark movie API payloads", () => {
   const movies = [{ FilmId: 42, Sessions: [], Title: "Example Movie" }];
-  const parsed = extractLandmarkMovies(showtimePage(movies));
+  const parsed = parseLandmarkMovies(movies);
 
   assert.deepEqual(parsed, movies);
   assert.throws(
-    () => extractLandmarkMovies("<html>No showtimes</html>"),
-    /did not include its showtime data/,
+    () => parseLandmarkMovies({ movies }),
+    /invalid movie data/,
   );
 });
 
@@ -63,50 +63,46 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
       Sessions: [
         {
           NewDate: "2026-09-01",
-          ExperienceTypes: [
+          Times: [
             {
-              Times: [
-                {
-                  CinemaId: 200,
-                  Experience: [
-                    { Name: "2D" },
-                    { Name: "Recliner Seating" },
-                    { Name: "Premiere Seats" },
-                  ],
-                  ExternalSessionId: "181815",
-                  Scheduleid: "11567088",
-                  Screen: "Screen 4",
-                  SessionExpired: false,
-                  SoldOut: false,
-                  StartTime: "7:30 PM",
-                },
-                {
-                  CinemaId: 200,
-                  ExternalSessionId: "181814",
-                  Scheduleid: "11567087",
-                  StartTime: "3:00 PM",
-                },
-                {
-                  CinemaId: 200,
-                  ExternalSessionId: "181816",
-                  Scheduleid: "11567089",
-                  SoldOut: true,
-                  StartTime: "8:30 PM",
-                },
-                {
-                  CinemaId: 200,
-                  ExternalSessionId: "181817",
-                  Scheduleid: "11567090",
-                  SessionExpired: true,
-                  StartTime: "9:30 PM",
-                },
+              CinemaId: 200,
+              Experience: [
+                { Name: "2D" },
+                { Name: "Recliner Seating" },
+                { Name: "Premiere Seats" },
               ],
+              ExternalSessionId: "181815",
+              Scheduleid: "11567088",
+              Screen: "Screen 4",
+              SessionExpired: false,
+              SoldOut: false,
+              StartTime: "7:30 PM",
+            },
+            {
+              CinemaId: 200,
+              ExternalSessionId: "181814",
+              Scheduleid: "11567087",
+              StartTime: "3:00 PM",
+            },
+            {
+              CinemaId: 200,
+              ExternalSessionId: "181816",
+              Scheduleid: "11567089",
+              SoldOut: true,
+              StartTime: "8:30 PM",
+            },
+            {
+              CinemaId: 200,
+              ExternalSessionId: "181817",
+              Scheduleid: "11567090",
+              SessionExpired: true,
+              StartTime: "9:30 PM",
             },
           ],
         },
         {
           NewDate: "2026-09-02",
-          ExperienceTypes: [],
+          Times: [],
         },
       ],
     },
@@ -118,18 +114,16 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
   globalThis.fetch = async (input) => {
     const url = String(input);
 
-    if (url === `${sourceOrigin}/showtimes/waterloo`) {
+    if (url === `${sourceOrigin}/movies/22/200`) {
       pageRequests += 1;
-      return new Response(showtimePage(movies), {
-        headers: { "Set-Cookie": "LandmarkSession=abc; Path=/; HttpOnly" },
-      });
+      return Response.json(movies);
     }
 
     throw new Error(`Unexpected request: ${url}`);
   };
 
   const client = new LandmarkClient(
-    [sourceOrigin],
+    sourceOrigin,
     () => new Date("2026-09-01T20:00:00.000Z"),
   );
   const showtimes = await client.getShowtimes(waterloo, "2026-09-01");
@@ -176,21 +170,18 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
 
 test("does not truncate Landmark showtime candidates at 40", async (t) => {
   const originalFetch = globalThis.fetch;
+  const apiOrigin = "https://uncapped-movie-api.landmark.test";
   const movies: LandmarkMovie[] = [
     {
       FilmId: 126642,
       Sessions: [
         {
-          ExperienceTypes: [
-            {
-              Times: Array.from({ length: 45 }, (_, index) => ({
-                CinemaId: 200,
-                ExternalSessionId: 181000 + index,
-                Scheduleid: 11500000 + index,
-                StartTime: "7:30 PM",
-              })),
-            },
-          ],
+          Times: Array.from({ length: 45 }, (_, index) => ({
+            CinemaId: 200,
+            ExternalSessionId: 181000 + index,
+            Scheduleid: 11500000 + index,
+            StartTime: "7:30 PM",
+          })),
           NewDate: "2026-09-01",
         },
       ],
@@ -202,15 +193,15 @@ test("does not truncate Landmark showtime candidates at 40", async (t) => {
     globalThis.fetch = originalFetch;
   });
   globalThis.fetch = async (input) => {
-    if (String(input) === `${sourceOrigin}/showtimes/waterloo`) {
-      return new Response(showtimePage(movies));
+    if (String(input) === `${apiOrigin}/movies/22/200`) {
+      return Response.json(movies);
     }
 
     throw new Error(`Unexpected request: ${String(input)}`);
   };
 
   const results = await new LandmarkClient(
-    [sourceOrigin],
+    apiOrigin,
     () => new Date("2026-09-01T12:00:00.000Z"),
   ).search({
     date: "2026-09-01",
@@ -223,10 +214,11 @@ test("does not truncate Landmark showtime candidates at 40", async (t) => {
   assert.equal(results.length, 45);
 });
 
-test("uses a successful official Landmark page when the reader is blocked", async (t) => {
+test("requests showtimes from Landmark's official movie API", async (t) => {
   const originalFetch = globalThis.fetch;
   const requests: string[] = [];
-  let originHeaders: Headers | undefined;
+  let apiHeaders: Headers | undefined;
+  const apiOrigin = "https://movie-api.landmark.test";
 
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -235,29 +227,23 @@ test("uses a successful official Landmark page when the reader is blocked", asyn
     const url = String(input);
     requests.push(url);
 
-    if (
-      url === "https://www.landmarkcinemas.com/showtimes/waterloo"
-    ) {
-      originHeaders = new Headers(init?.headers);
-      return new Response(showtimePage([]));
+    if (url === `${apiOrigin}/movies/22/200`) {
+      apiHeaders = new Headers(init?.headers);
+      return Response.json([]);
     }
 
     throw new Error(`Blocked request: ${url}`);
   };
 
-  const showtimes = await new LandmarkClient().getShowtimes(
+  const showtimes = await new LandmarkClient(apiOrigin).getShowtimes(
     waterloo,
     "2026-09-01",
   );
 
   assert.deepEqual(showtimes, []);
-  assert.equal(
-    requests.includes(
-      "https://r.jina.ai/https://www.landmarkcinemas.com/showtimes/waterloo",
-    ),
-    true,
-  );
-  assert.match(originHeaders?.get("user-agent") ?? "", /^Mozilla\/5\.0/);
+  assert.deepEqual(requests, [`${apiOrigin}/movies/22/200`]);
+  assert.equal(apiHeaders?.get("accept"), "application/json");
+  assert.match(apiHeaders?.get("user-agent") ?? "", /^Mozilla\/5\.0/);
 });
 
 test("gets Landmark booking API data and normalizes its seat map", async (t) => {
@@ -519,26 +505,23 @@ test("uses Vista seat availability and accessibility values", () => {
   assert.equal(snapshot.accessibilityCount, 4);
 });
 
-test("uses the plain HTTP reader and shares its short-lived page cache", async (t) => {
+test("shares the official movie API's short-lived cache", async (t) => {
   const originalFetch = globalThis.fetch;
-  let readerHeaders: Headers | undefined;
-  let readerRequests = 0;
+  const apiOrigin = "https://cached-movie-api.landmark.test";
+  let apiHeaders: Headers | undefined;
+  let apiRequests = 0;
   const seatRequests: string[] = [];
   const movies: LandmarkMovie[] = [
     {
       FilmId: 126642,
       Sessions: [
         {
-          ExperienceTypes: [
+          Times: [
             {
-              Times: [
-                {
-                  CinemaId: 200,
-                  ExternalSessionId: "181815",
-                  Scheduleid: "11567088",
-                  StartTime: "7:30 PM",
-                },
-              ],
+              CinemaId: 200,
+              ExternalSessionId: "181815",
+              Scheduleid: "11567088",
+              StartTime: "7:30 PM",
             },
           ],
           NewDate: "2026-09-01",
@@ -554,13 +537,10 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   globalThis.fetch = async (input, init) => {
     const url = String(input);
 
-    if (
-      url ===
-      "https://r.jina.ai/https://www.landmarkcinemas.com/showtimes/waterloo"
-    ) {
-      readerRequests += 1;
-      readerHeaders = new Headers(init?.headers);
-      return new Response(showtimePage(movies));
+    if (url === `${apiOrigin}/movies/22/200`) {
+      apiRequests += 1;
+      apiHeaders = new Headers(init?.headers);
+      return Response.json(movies);
     }
 
     if (
@@ -584,8 +564,8 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
     throw new Error(`Unexpected request: ${url}`);
   };
 
-  const firstClient = new LandmarkClient();
-  const secondClient = new LandmarkClient();
+  const firstClient = new LandmarkClient(apiOrigin);
+  const secondClient = new LandmarkClient(apiOrigin);
   const firstShowtimes = await firstClient.getShowtimes(
     waterloo,
     "2026-09-01",
@@ -596,10 +576,8 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   );
   const snapshot = await fetchLandmarkSeatSnapshot("200", "11567088");
 
-  assert.equal(readerRequests, 1);
-  assert.equal(readerHeaders?.get("x-engine"), null);
-  assert.equal(readerHeaders?.get("x-respond-with"), "html");
-  assert.equal(readerHeaders?.get("x-cache-tolerance"), null);
+  assert.equal(apiRequests, 1);
+  assert.equal(apiHeaders?.get("accept"), "application/json");
   assert.equal(firstShowtimes.length, 1);
   assert.equal(secondShowtimes.length, 1);
   assert.equal(snapshot.sellableSeats, 1);
@@ -608,9 +586,10 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   ]);
 });
 
-test("fails clearly when every plain HTTP source is blocked", async (t) => {
+test("fails clearly when the official movie API is blocked", async (t) => {
   const originalFetch = globalThis.fetch;
   const requests: string[] = [];
+  const apiOrigin = "https://blocked-movie-api.landmark.test";
 
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -621,13 +600,10 @@ test("fails clearly when every plain HTTP source is blocked", async (t) => {
   };
 
   await assert.rejects(
-    new LandmarkClient([sourceOrigin]).getShowtimes(brandon, "2026-09-01"),
-    /Landmark showtimes are unavailable for Brandon/,
+    new LandmarkClient(apiOrigin).getShowtimes(brandon, "2026-09-01"),
+    /Landmark movie API failed with HTTP 403/,
   );
-  assert.deepEqual(requests.sort(), [
-    "https://r.jina.ai/https://www.landmarkcinemas.com/showtimes/brandon",
-    `${sourceOrigin}/showtimes/brandon`,
-  ]);
+  assert.deepEqual(requests, [`${apiOrigin}/movies/22/181`]);
 });
 
 test("converts Landmark local showtimes with daylight-saving offsets", () => {
@@ -640,19 +616,6 @@ test("converts Landmark local showtimes with daylight-saving offsets", () => {
     "2026-12-02T00:30:00.000Z",
   );
 });
-
-function showtimePage(movies: LandmarkMovie[]): string {
-  return `<!doctype html>
-    <input id="AntiForgeryToken" value="token&amp;part">
-    <script>
-      var pc = pc || {};
-      pc.showtimesdata = {
-        'nowbooking': {
-          '0': ${JSON.stringify(movies)}
-        }
-      };
-    </script>`;
-}
 
 function seatFixture(id: string, column: number, status: number) {
   return {
