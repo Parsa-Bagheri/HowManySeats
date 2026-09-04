@@ -1583,10 +1583,6 @@ function CleanFilterToggle({
 function CleanResultCard({ result }: { result: SearchResult }) {
   const startsAt = new Date(result.showtime.startsAt);
   const checkedAt = new Date(result.snapshot.checkedAt);
-  const availableSeats = Math.max(
-    0,
-    result.snapshot.sellableSeats - result.snapshot.occupiedEstimate,
-  );
   const providerLabel = cinemaProviderLabel(result.theatre.provider);
   const timeZoneOptions = theatreTimeZoneOptions(result.theatre);
   const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString([], timeZoneOptions)}`;
@@ -1666,12 +1662,11 @@ function CleanResultCard({ result }: { result: SearchResult }) {
 
         <div className="grid min-w-56 gap-1 rounded-md border border-neutral-800 bg-black/35 p-3 text-sm">
           <p className="font-semibold text-white">
-            {availableSeats} available /{" "}
+            {result.snapshot.occupiedEstimate} occupied /{" "}
             {result.snapshot.sellableSeats} seats
           </p>
           <p className="text-neutral-400">
-            {result.snapshot.occupiedEstimate} occupied · Last checked{" "}
-            {relativeMinutes(checkedAt)} min ago
+            Last checked {relativeMinutes(checkedAt)} min ago
           </p>
         </div>
       </div>
