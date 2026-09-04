@@ -53,6 +53,7 @@ import type {
   MovieSuggestion,
   SearchCandidate,
   SearchResult,
+  SeatSnapshot,
   SortOption,
   Theatre,
 } from "@/lib/types";
@@ -100,12 +101,26 @@ type SearchViewProps = {
   activeFilterCount: number;
   error: string | undefined;
   form: SearchFormProps;
+  hasMoreResults: boolean;
   hasSearched: boolean;
+  loadingMore: boolean;
   onDismissThemePrompt: () => void;
+  onLoadMoreResults: () => void;
   results: SearchResult[];
   setUiMode: (mode: UiMode) => void;
   showThemePrompt: boolean;
   uiMode: UiMode;
+  warning: string | undefined;
+};
+
+type PendingSeatSearch = {
+  candidates: SearchCandidate[];
+  controller: AbortController;
+  hadSeatFailures: boolean;
+  offset: number;
+  requestId: number;
+  state: SearchState;
+  unavailableProviders: CinemaProvider[];
 };
 
 type FilterOption = {
@@ -136,6 +151,7 @@ const SORT_LABELS = {
 const THEME_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const FUN_RESULT_BATCH_SIZE = 12;
+const SEAT_RESULT_BATCH_SIZE = 40;
 const LANDMARK_SEAT_CHECK_CONCURRENCY = 6;
 
 const funInputClass =
@@ -158,7 +174,10 @@ export default function HomePageClient({
   const [movieSuggestionsOpen, setMovieSuggestionsOpen] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreResults, setHasMoreResults] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [warning, setWarning] = useState<string | undefined>();
   const [hasSearched, setHasSearched] = useState(false);
   const [uiMode, setUiModeState] = useState<UiMode>(initialUiMode);
   const [showThemePrompt, setShowThemePrompt] = useState(false);
@@ -167,6 +186,8 @@ export default function HomePageClient({
   const skipNextMovieSuggestionFetch = useRef(false);
   const activeSearchController = useRef<AbortController | undefined>(undefined);
   const activeSearchId = useRef(0);
+  const loadingMoreRef = useRef(false);
+  const pendingSeatSearch = useRef<PendingSeatSearch | undefined>(undefined);
   const lastAppliedFilterSignature = useRef<string | undefined>(undefined);
   const latestSearchState = useRef(searchState);
 
@@ -271,9 +292,14 @@ export default function HomePageClient({
     activeSearchId.current = requestId;
     activeSearchController.current?.abort();
     activeSearchController.current = controller;
+    pendingSeatSearch.current = undefined;
+    loadingMoreRef.current = false;
     lastAppliedFilterSignature.current = getFilterSignature(state);
     setLoading(true);
+    setLoadingMore(false);
+    setHasMoreResults(false);
     setError(undefined);
+    setWarning(undefined);
     setResults([]);
 
     const params = buildSearchParams(state);
@@ -284,7 +310,10 @@ export default function HomePageClient({
         signal: controller.signal,
       });
       const body = (await response.json()) as
-        | { results: SearchCandidate[] }
+        | {
+            results: SearchCandidate[];
+            unavailableProviders: CinemaProvider[];
+          }
         | { error: string };
 
       if (!response.ok || !("results" in body)) {
@@ -299,14 +328,32 @@ export default function HomePageClient({
         return;
       }
 
-      const nextResults = await loadSeatSnapshots(
-        body.results,
+      const seatCandidates = interleaveProviderCandidates(body.results);
+      const page = await loadSeatSnapshotPage(
+        seatCandidates,
+        0,
         state,
         controller.signal,
       );
 
       if (requestId === activeSearchId.current) {
-        setResults(nextResults);
+        pendingSeatSearch.current = {
+          candidates: seatCandidates,
+          controller,
+          hadSeatFailures: page.hadFailures,
+          offset: page.nextOffset,
+          requestId,
+          state,
+          unavailableProviders: body.unavailableProviders,
+        };
+        setResults(sortSearchResults(page.results, state.sortBy));
+        setHasMoreResults(page.nextOffset < seatCandidates.length);
+        setWarning(
+          buildSearchWarning(
+            body.unavailableProviders,
+            page.hadFailures,
+          ),
+        );
       }
     } catch {
       if (!controller.signal.aborted && requestId === activeSearchId.current) {
@@ -319,6 +366,63 @@ export default function HomePageClient({
       if (requestId === activeSearchId.current) {
         setLoading(false);
         setHasSearched(true);
+      }
+    }
+  }, []);
+
+  const loadMoreResults = useCallback(async () => {
+    const pending = pendingSeatSearch.current;
+
+    if (
+      !pending ||
+      loadingMoreRef.current ||
+      pending.offset >= pending.candidates.length ||
+      pending.controller.signal.aborted
+    ) {
+      return;
+    }
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+
+    try {
+      const page = await loadSeatSnapshotPage(
+        pending.candidates,
+        pending.offset,
+        pending.state,
+        pending.controller.signal,
+      );
+
+      if (pending.requestId !== activeSearchId.current) {
+        return;
+      }
+
+      pending.offset = page.nextOffset;
+      pending.hadSeatFailures ||= page.hadFailures;
+      setResults((current) =>
+        sortSearchResults([...current, ...page.results], pending.state.sortBy),
+      );
+      setHasMoreResults(pending.offset < pending.candidates.length);
+      setWarning(
+        buildSearchWarning(
+          pending.unavailableProviders,
+          pending.hadSeatFailures,
+        ),
+      );
+    } catch (error) {
+      if (
+        pending.requestId === activeSearchId.current &&
+        !(error instanceof DOMException && error.name === "AbortError")
+      ) {
+        pending.hadSeatFailures = true;
+        setWarning(
+          buildSearchWarning(pending.unavailableProviders, true),
+        );
+      }
+    } finally {
+      if (pending.requestId === activeSearchId.current) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
       }
     }
   }, []);
@@ -527,12 +631,16 @@ export default function HomePageClient({
     activeFilterCount,
     error,
     form,
+    hasMoreResults,
     hasSearched,
+    loadingMore,
     onDismissThemePrompt: dismissThemePrompt,
+    onLoadMoreResults: loadMoreResults,
     results,
     setUiMode,
     showThemePrompt,
     uiMode,
+    warning,
   };
 
   return uiMode === "fun" ? (
@@ -546,14 +654,109 @@ function rememberUiModePreference(mode: UiMode) {
   document.cookie = `${UI_MODE_COOKIE_NAME}=${mode}; Path=/; Max-Age=${UI_MODE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
 }
 
-async function loadSeatSnapshots(
+async function loadSeatSnapshotPage(
   candidates: SearchCandidate[],
+  offset: number,
   state: SearchState,
   signal: AbortSignal,
-): Promise<SearchResult[]> {
-  const results: Array<SearchResult | undefined> = new Array(
-    candidates.length,
+): Promise<{
+  hadFailures: boolean;
+  nextOffset: number;
+  results: SearchResult[];
+}> {
+  const batch = candidates.slice(
+    offset,
+    offset + SEAT_RESULT_BATCH_SIZE,
   );
+  const cineplexCandidates = batch.filter(
+    (candidate) => candidate.theatre.provider === "cineplex",
+  );
+  const landmarkCandidates = batch.filter(
+    (candidate) => candidate.theatre.provider === "landmark",
+  );
+  const [cineplex, landmark] = await Promise.all([
+    loadCineplexSeatSnapshots(cineplexCandidates, signal),
+    loadLandmarkSeatSnapshots(landmarkCandidates, signal),
+  ]);
+  const resultsById = new Map(
+    [...cineplex.results, ...landmark.results].map((result) => [
+      result.showtime.id,
+      result,
+    ]),
+  );
+  const results = batch
+    .map((candidate) => resultsById.get(candidate.showtime.id))
+    .filter(
+      (result): result is SearchResult =>
+        Boolean(result) && matchesSeatFilters(result as SearchResult, state.filters),
+    );
+
+  return {
+    hadFailures: cineplex.hadFailures || landmark.hadFailures,
+    nextOffset: offset + batch.length,
+    results,
+  };
+}
+
+async function loadCineplexSeatSnapshots(
+  candidates: SearchCandidate[],
+  signal: AbortSignal,
+): Promise<{ hadFailures: boolean; results: SearchResult[] }> {
+  if (candidates.length === 0 || signal.aborted) {
+    return { hadFailures: false, results: [] };
+  }
+
+  try {
+    const response = await fetch("/api/cineplex-seats", {
+      body: JSON.stringify({
+        requests: candidates.map((candidate) => ({
+          resultId: candidate.showtime.id,
+          showtimeId: candidate.showtime.providerShowtimeId,
+          theatreId: candidate.theatre.providerTheatreId,
+        })),
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+      signal,
+    });
+    const body = (await response.json()) as
+      | {
+          failedResultIds: string[];
+          results: Array<{ resultId: string; snapshot: SeatSnapshot }>;
+        }
+      | { error: string };
+
+    if (!response.ok || !("results" in body)) {
+      return { hadFailures: true, results: [] };
+    }
+
+    const snapshots = new Map(
+      body.results.map((result) => [result.resultId, result.snapshot]),
+    );
+    const results = candidates.flatMap((candidate) => {
+      const snapshot = snapshots.get(candidate.showtime.id);
+      return snapshot ? [{ ...candidate, snapshot }] : [];
+    });
+
+    return {
+      hadFailures: body.failedResultIds.length > 0,
+      results,
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return { hadFailures: false, results: [] };
+    }
+
+    return { hadFailures: true, results: [] };
+  }
+}
+
+async function loadLandmarkSeatSnapshots(
+  candidates: SearchCandidate[],
+  signal: AbortSignal,
+): Promise<{ hadFailures: boolean; results: SearchResult[] }> {
+  const results: SearchResult[] = [];
+  let hadFailures = false;
 
   for (
     let offset = 0;
@@ -561,7 +764,7 @@ async function loadSeatSnapshots(
     offset += LANDMARK_SEAT_CHECK_CONCURRENCY
   ) {
     if (signal.aborted) {
-      return [];
+      return { hadFailures, results: [] };
     }
 
     const batch = candidates.slice(
@@ -570,36 +773,112 @@ async function loadSeatSnapshots(
     );
 
     await Promise.all(
-      batch.map(async (candidate, batchIndex) => {
-        let result: SearchResult | undefined;
-
-        if (candidate.snapshot) {
-          result = candidate as SearchResult;
-        } else if (candidate.theatre.provider === "landmark") {
-          try {
-            const snapshot = await fetchLandmarkSeatSnapshot(
-              candidate.theatre.providerTheatreId,
-              candidate.showtime.providerShowtimeId,
-              signal,
-            );
-            result = { ...candidate, snapshot };
-          } catch {
-            return;
+      batch.map(async (candidate) => {
+        try {
+          const snapshot = await fetchLandmarkSeatSnapshot(
+            candidate.theatre.providerTheatreId,
+            candidate.showtime.providerShowtimeId,
+            signal,
+          );
+          results.push({ ...candidate, snapshot });
+        } catch {
+          if (!signal.aborted) {
+            hadFailures = true;
           }
-        }
-
-        if (
-          !signal.aborted &&
-          result &&
-          matchesSeatFilters(result, state.filters)
-        ) {
-          results[offset + batchIndex] = result;
         }
       }),
     );
   }
 
-  return results.filter((result): result is SearchResult => Boolean(result));
+  return { hadFailures, results };
+}
+
+function buildSearchWarning(
+  unavailableProviders: CinemaProvider[],
+  hadSeatFailures: boolean,
+): string | undefined {
+  const messages = unavailableProviders.map(
+    (provider) =>
+      `${cinemaProviderLabel(provider)} results are temporarily unavailable.`,
+  );
+
+  if (hadSeatFailures) {
+    messages.push("Some seat counts couldn't be loaded.");
+  }
+
+  return messages.length > 0 ? messages.join(" ") : undefined;
+}
+
+function interleaveProviderCandidates(
+  candidates: SearchCandidate[],
+): SearchCandidate[] {
+  const groups = new Map<CinemaProvider, SearchCandidate[]>([
+    ["cineplex", []],
+    ["landmark", []],
+  ]);
+
+  for (const candidate of candidates) {
+    groups.get(candidate.theatre.provider)?.push(candidate);
+  }
+
+  const interleaved: SearchCandidate[] = [];
+  const longestGroup = Math.max(
+    0,
+    ...Array.from(groups.values(), (group) => group.length),
+  );
+
+  for (let index = 0; index < longestGroup; index += 1) {
+    for (const provider of ["cineplex", "landmark"] as const) {
+      const candidate = groups.get(provider)?.[index];
+
+      if (candidate) {
+        interleaved.push(candidate);
+      }
+    }
+  }
+
+  return interleaved;
+}
+
+function sortSearchResults(
+  results: SearchResult[],
+  sortBy: SortOption,
+): SearchResult[] {
+  const direction = sortBy.endsWith("desc") ? -1 : 1;
+
+  return [...results].sort((a, b) => {
+    const distance = compareOptionalDistance(
+      a.distanceKm,
+      b.distanceKm,
+      sortBy.startsWith("distance") ? direction : 1,
+    );
+    const time =
+      (new Date(a.showtime.startsAt).getTime() -
+        new Date(b.showtime.startsAt).getTime()) *
+      (sortBy.startsWith("time") ? direction : 1);
+
+    return sortBy.startsWith("distance") ? distance || time : time || distance;
+  });
+}
+
+function compareOptionalDistance(
+  a: number | undefined,
+  b: number | undefined,
+  direction: number,
+): number {
+  if (a === undefined && b === undefined) {
+    return 0;
+  }
+
+  if (a === undefined) {
+    return 1;
+  }
+
+  if (b === undefined) {
+    return -1;
+  }
+
+  return (a - b) * direction;
 }
 
 function matchesSeatFilters(
@@ -618,12 +897,16 @@ function CleanHomeView(props: SearchViewProps) {
     activeFilterCount,
     error,
     form,
+    hasMoreResults,
     hasSearched,
+    loadingMore,
+    onLoadMoreResults,
     results,
     setUiMode,
     showThemePrompt,
     uiMode,
     onDismissThemePrompt,
+    warning,
   } = props;
   const { date, endDate, loading, location, sortBy } = form;
   return (
@@ -657,7 +940,7 @@ function CleanHomeView(props: SearchViewProps) {
                 <div>
                   <p className="text-sm text-neutral-400">Results</p>
                   <p className="mt-1 text-3xl font-semibold text-white">
-                    {resultCount(results, loading)}
+                    {resultCount(results, loading, hasMoreResults)}
                   </p>
                 </div>
                 <div className="text-right text-sm text-neutral-400">
@@ -683,9 +966,22 @@ function CleanHomeView(props: SearchViewProps) {
               </div>
             ) : null}
 
+            {warning ? (
+              <div
+                className="rounded-md border border-amber-400/40 bg-amber-950/30 p-3 text-sm text-amber-100"
+                role="status"
+              >
+                {warning}
+              </div>
+            ) : null}
+
             {loading ? <CleanSearchLoader /> : null}
 
-            {!loading && hasSearched && !error && results.length === 0 ? (
+            {!loading &&
+            hasSearched &&
+            !error &&
+            !hasMoreResults &&
+            results.length === 0 ? (
               <div
                 className="rounded-lg border border-neutral-800 bg-[#111111] p-5 text-sm leading-6 text-neutral-300"
                 role="status"
@@ -697,6 +993,13 @@ function CleanHomeView(props: SearchViewProps) {
             ) : null}
 
             <CleanResultList results={results} />
+            {hasMoreResults ? (
+              <LoadMoreShowtimesButton
+                loading={loadingMore}
+                mode="clean"
+                onClick={onLoadMoreResults}
+              />
+            ) : null}
           </section>
         </div>
       </div>
@@ -713,12 +1016,16 @@ function FunHomeView(props: SearchViewProps) {
     activeFilterCount,
     error,
     form,
+    hasMoreResults,
     hasSearched,
+    loadingMore,
+    onLoadMoreResults,
     results,
     setUiMode,
     showThemePrompt,
     uiMode,
     onDismissThemePrompt,
+    warning,
   } = props;
   const { date, endDate, loading, location, radiusKm, sortBy } = form;
   return (
@@ -805,7 +1112,7 @@ function FunHomeView(props: SearchViewProps) {
                   <p
                     className={`mt-1 font-black leading-none ${loading ? "text-[clamp(2.5rem,4.5vw,4rem)]" : "text-[clamp(4rem,10vw,7rem)]"}`}
                   >
-                    {resultCount(results, loading)}
+                    {resultCount(results, loading, hasMoreResults)}
                   </p>
                 </div>
                 <div className="grid gap-4 p-5 lg:pr-12">
@@ -848,9 +1155,22 @@ function FunHomeView(props: SearchViewProps) {
               </div>
             ) : null}
 
+            {warning ? (
+              <div
+                className="border-[6px] border-black bg-[#f7e900] p-4 text-sm font-black uppercase text-black shadow-[10px_10px_0_#111111] sm:rotate-1"
+                role="status"
+              >
+                {warning}
+              </div>
+            ) : null}
+
             {loading ? <FunSearchLoader /> : null}
 
-            {!loading && hasSearched && !error && results.length === 0 ? (
+            {!loading &&
+            hasSearched &&
+            !error &&
+            !hasMoreResults &&
+            results.length === 0 ? (
               <div
                 className="border-[6px] border-black bg-white p-5 text-sm font-black uppercase leading-6 shadow-[10px_10px_0_#111111] sm:rotate-1"
                 role="status"
@@ -863,6 +1183,9 @@ function FunHomeView(props: SearchViewProps) {
 
             <FunResultList
               key={results[0]?.snapshot.checkedAt ?? "no-results"}
+              hasMoreResults={hasMoreResults}
+              loadingMore={loadingMore}
+              onLoadMoreResults={onLoadMoreResults}
               results={results}
             />
           </section>
@@ -1892,8 +2215,14 @@ function FunResultCard({ result }: { result: SearchResult }) {
 }
 
 const FunResultList = memo(function FunResultList({
+  hasMoreResults,
+  loadingMore,
+  onLoadMoreResults,
   results,
 }: {
+  hasMoreResults: boolean;
+  loadingMore: boolean;
+  onLoadMoreResults: () => void;
   results: SearchResult[];
 }) {
   const [visibleCount, setVisibleCount] = useState(FUN_RESULT_BATCH_SIZE);
@@ -1919,10 +2248,42 @@ const FunResultList = memo(function FunResultList({
         >
           Show {Math.min(FUN_RESULT_BATCH_SIZE, remainingCount)} more results
         </button>
+      ) : hasMoreResults ? (
+        <LoadMoreShowtimesButton
+          loading={loadingMore}
+          mode="fun"
+          onClick={onLoadMoreResults}
+        />
       ) : null}
     </>
   );
 });
+
+function LoadMoreShowtimesButton({
+  loading,
+  mode,
+  onClick,
+}: {
+  loading: boolean;
+  mode: UiMode;
+  onClick: () => void;
+}) {
+  const className =
+    mode === "fun"
+      ? "focus-ring mx-auto inline-flex min-h-14 items-center justify-center border-[6px] border-black bg-[#f7e900] px-6 text-base font-black uppercase text-black shadow-[8px_8px_0_#111111] transition hover:bg-[#00e676] disabled:cursor-wait disabled:bg-zinc-300"
+      : "focus-ring mx-auto inline-flex min-h-11 items-center justify-center rounded-md border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-300 hover:text-black disabled:cursor-wait disabled:border-neutral-700 disabled:text-neutral-500";
+
+  return (
+    <button
+      className={className}
+      type="button"
+      disabled={loading}
+      onClick={onClick}
+    >
+      {loading ? "Checking more showtimes" : "Check more showtimes"}
+    </button>
+  );
+}
 
 function MetricSlab({
   label,
@@ -1969,12 +2330,16 @@ function sortLabel(sortBy: SortOption): string {
   return SORT_LABELS[sortBy];
 }
 
-function resultCount(results: SearchResult[], loading: boolean): string {
+function resultCount(
+  results: SearchResult[],
+  loading: boolean,
+  hasMoreResults: boolean,
+): string {
   if (loading) {
     return "Searching";
   }
 
-  return String(results.length);
+  return `${results.length}${hasMoreResults ? "+" : ""}`;
 }
 
 function relativeMinutes(date: Date): number {
@@ -1995,5 +2360,6 @@ function getFilterSignature(state: SearchState): string {
   return JSON.stringify({
     experienceTypes: [...state.experienceTypes].sort(),
     filters: state.filters,
+    sortBy: state.sortBy,
   });
 }

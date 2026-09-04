@@ -19,6 +19,11 @@ export type ProviderEntry = {
   provider: CinemaProvider;
 };
 
+export type CinemaSearchResult = {
+  results: SearchCandidate[];
+  unavailableProviders: CinemaProvider[];
+};
+
 export class CinemaSearch {
   private readonly providers: readonly ProviderEntry[];
 
@@ -31,12 +36,13 @@ export class CinemaSearch {
     this.providers = providers;
   }
 
-  async search(query: SearchQuery): Promise<SearchCandidate[]> {
+  async search(query: SearchQuery): Promise<CinemaSearchResult> {
     const settled = await Promise.allSettled(
       this.providers.map(({ client }) => client.search(query)),
     );
     const results: SearchCandidate[] = [];
     const failures: unknown[] = [];
+    const unavailableProviders: CinemaProvider[] = [];
 
     settled.forEach((result, index) => {
       if (result.status === "fulfilled") {
@@ -44,9 +50,13 @@ export class CinemaSearch {
         return;
       }
 
-      const provider = this.providers[index]?.provider ?? "unknown";
-      console.error(`${provider} search failed`, result.reason);
+      const provider = this.providers[index]?.provider;
+      console.error(`${provider ?? "unknown"} search failed`, result.reason);
       failures.push(result.reason);
+
+      if (provider) {
+        unavailableProviders.push(provider);
+      }
     });
 
     if (settled.length > 0 && failures.length === settled.length) {
@@ -56,7 +66,10 @@ export class CinemaSearch {
     const deduped = Array.from(
       new Map(results.map((result) => [result.showtime.id, result])).values(),
     );
-    return sortResults(deduped, query.sortBy ?? "distance-asc");
+    return {
+      results: sortResults(deduped, query.sortBy ?? "distance-asc"),
+      unavailableProviders,
+    };
   }
 
   async suggestMovieTitles(

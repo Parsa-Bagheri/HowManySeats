@@ -174,6 +174,92 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
   );
 });
 
+test("does not truncate Landmark showtime candidates at 40", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const movies: LandmarkMovie[] = [
+    {
+      FilmId: 126642,
+      Sessions: [
+        {
+          ExperienceTypes: [
+            {
+              Times: Array.from({ length: 45 }, (_, index) => ({
+                CinemaId: 200,
+                ExternalSessionId: 181000 + index,
+                Scheduleid: 11500000 + index,
+                StartTime: "7:30 PM",
+              })),
+            },
+          ],
+          NewDate: "2026-09-01",
+        },
+      ],
+      Title: "Example Movie",
+    },
+  ];
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    if (String(input) === `${sourceOrigin}/showtimes/waterloo`) {
+      return new Response(showtimePage(movies));
+    }
+
+    throw new Error(`Unexpected request: ${String(input)}`);
+  };
+
+  const results = await new LandmarkClient(
+    [sourceOrigin],
+    () => new Date("2026-09-01T12:00:00.000Z"),
+  ).search({
+    date: "2026-09-01",
+    latitude: waterloo.latitude,
+    location: "Waterloo",
+    longitude: waterloo.longitude,
+    radiusKm: 25,
+  });
+
+  assert.equal(results.length, 45);
+});
+
+test("uses a successful official Landmark page when the reader is blocked", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  let originHeaders: Headers | undefined;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    requests.push(url);
+
+    if (
+      url === "https://www.landmarkcinemas.com/showtimes/waterloo"
+    ) {
+      originHeaders = new Headers(init?.headers);
+      return new Response(showtimePage([]));
+    }
+
+    throw new Error(`Blocked request: ${url}`);
+  };
+
+  const showtimes = await new LandmarkClient().getShowtimes(
+    waterloo,
+    "2026-09-01",
+  );
+
+  assert.deepEqual(showtimes, []);
+  assert.equal(
+    requests.includes(
+      "https://r.jina.ai/https://www.landmarkcinemas.com/showtimes/waterloo",
+    ),
+    true,
+  );
+  assert.match(originHeaders?.get("user-agent") ?? "", /^Mozilla\/5\.0/);
+});
+
 test("gets Landmark booking API data and normalizes its seat map", async (t) => {
   const originalFetch = globalThis.fetch;
   let seatRequest: { headers: Headers; method?: string } | undefined;
@@ -511,9 +597,9 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   const snapshot = await fetchLandmarkSeatSnapshot("200", "11567088");
 
   assert.equal(readerRequests, 1);
-  assert.equal(readerHeaders?.get("x-engine"), "direct");
+  assert.equal(readerHeaders?.get("x-engine"), null);
   assert.equal(readerHeaders?.get("x-respond-with"), "html");
-  assert.equal(readerHeaders?.get("x-cache-tolerance"), "60");
+  assert.equal(readerHeaders?.get("x-cache-tolerance"), null);
   assert.equal(firstShowtimes.length, 1);
   assert.equal(secondShowtimes.length, 1);
   assert.equal(snapshot.sellableSeats, 1);

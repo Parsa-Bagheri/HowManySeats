@@ -216,6 +216,13 @@ test("checks seat maps in bounded parallel batches", async (t) => {
     latitude: 43.65,
     longitude: -79.38,
   });
+  const snapshots = await client.getSeatSnapshots(
+    results.map((result) => ({
+      resultId: result.showtime.id,
+      showtimeId: result.showtime.providerShowtimeId,
+      theatreId: result.theatre.providerTheatreId,
+    })),
+  );
   const suggestions = await client.suggestMovieTitles({
     date: "2026-09-01",
     endDate: "2026-09-02",
@@ -227,6 +234,83 @@ test("checks seat maps in bounded parallel batches", async (t) => {
   });
 
   assert.equal(results.length, 5);
+  assert.equal(results[0]?.snapshot, undefined);
+  assert.equal(snapshots.results.length, 5);
+  assert.deepEqual(snapshots.failedResultIds, []);
   assert.equal(suggestions[0]?.showtimeCount, 5);
   assert.equal(peakSeatRequests, 8);
+});
+
+test("does not truncate showtime candidates at 40", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let seatRequests = 0;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url.includes("/v1/theatres?")) {
+      return Response.json({
+        nearbyTheatres: [
+          {
+            location: {
+              city: "Toronto",
+              geoLocation: { latitude: 43.65, longitude: -79.38 },
+              provinceCode: "ON",
+            },
+            theatreId: 7402,
+            theatreName: "Example Theatre",
+          },
+        ],
+      });
+    }
+
+    if (url.includes("/v1/showtimes?")) {
+      return Response.json([
+        {
+          dates: [
+            {
+              movies: [
+                {
+                  experiences: [
+                    {
+                      experienceTypes: ["Regular"],
+                      sessions: Array.from({ length: 45 }, (_, index) => ({
+                        isReservedSeating: true,
+                        showStartDateTime: "2026-09-01T20:00:00",
+                        vistaSessionId: 2000 + index,
+                      })),
+                    },
+                  ],
+                  name: "Example Movie",
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    }
+
+    if (url.includes("/seat-layout") || url.includes("/seat-availability")) {
+      seatRequests += 1;
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  const results = await new CineplexClient(
+    "test-key",
+    () => new Date("2026-09-01T12:00:00.000Z"),
+  ).search({
+    date: "2026-09-01",
+    latitude: 43.65,
+    location: "Toronto",
+    longitude: -79.38,
+    radiusKm: 25,
+  });
+
+  assert.equal(results.length, 45);
+  assert.equal(seatRequests, 0);
 });

@@ -32,7 +32,10 @@ test("keeps results from an available provider when another provider fails", asy
     { client: available, provider: "landmark" },
   ]);
 
-  assert.deepEqual(await search.search(query), [result]);
+  assert.deepEqual(await search.search(query), {
+    results: [result],
+    unavailableProviders: ["cineplex"],
+  });
   assert.deepEqual(
     await search.suggestMovieTitles({ ...query, movieTitle: "example" }),
     [
@@ -75,12 +78,13 @@ test("merges and sorts results from all available providers", async () => {
     },
   ]);
 
-  const results = await search.search({ ...query, sortBy: "time-asc" });
+  const searchResult = await search.search({ ...query, sortBy: "time-asc" });
 
   assert.deepEqual(
-    results.map((result) => result.theatre.provider),
+    searchResult.results.map((result) => result.theatre.provider),
     ["cineplex", "landmark"],
   );
+  assert.deepEqual(searchResult.unavailableProviders, []);
   assert.deepEqual(
     await search.suggestMovieTitles({ ...query, movieTitle: "example" }),
     [

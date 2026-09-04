@@ -59,12 +59,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const results = await new CinemaSearch().search({
+    const search = await new CinemaSearch().search({
       ...parsed.data,
       endDate: parsed.data.endDate ?? parsed.data.date,
     });
 
-    return NextResponse.json({ results });
+    return NextResponse.json(search);
   } catch (error) {
     console.error("Cinema search request failed", error);
 

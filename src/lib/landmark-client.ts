@@ -93,7 +93,6 @@ export class LandmarkClient {
     string,
     Promise<LandmarkPageContext>
   >();
-  private readonly readerFirst: boolean;
   private readonly sourceOrigins: readonly string[];
   private readonly now: () => Date;
 
@@ -101,7 +100,6 @@ export class LandmarkClient {
     sourceOrigins?: readonly string[],
     now: () => Date = () => new Date(),
   ) {
-    this.readerFirst = sourceOrigins === undefined;
     this.sourceOrigins = sourceOrigins ?? getConfiguredSourceOrigins();
     this.now = now;
   }
@@ -118,11 +116,6 @@ export class LandmarkClient {
       process.env.LANDMARK_MAX_THEATRES_PER_SEARCH,
       5,
       LANDMARK_THEATRES.length,
-    );
-    const maxSeatChecks = readPositiveInteger(
-      process.env.LANDMARK_MAX_SEAT_CHECKS_PER_SEARCH,
-      40,
-      100,
     );
     const sortBy = query.sortBy ?? "distance-asc";
     const candidateGroups: ShowtimeCandidate[][] = searchDates.map(() => []);
@@ -179,7 +172,7 @@ export class LandmarkClient {
           ),
         ).map((candidate) => [candidate.showtime.id, candidate]),
       ).values(),
-    ).slice(0, maxSeatChecks);
+    );
     return sortResults(candidates, sortBy);
   }
 
@@ -401,12 +394,10 @@ export class LandmarkClient {
   ): Promise<LandmarkPageContext> {
     const failures: unknown[] = [];
 
-    if (this.readerFirst) {
-      try {
-        return await fetchLandmarkReaderPage(theatre);
-      } catch (error) {
-        failures.push(error);
-      }
+    try {
+      return await fetchLandmarkReaderPage(theatre);
+    } catch (error) {
+      failures.push(error);
     }
 
     try {
@@ -416,15 +407,9 @@ export class LandmarkClient {
         ),
       );
     } catch (error) {
-      failures.push(error);
-    }
-
-    if (!this.readerFirst) {
-      try {
-        return await fetchLandmarkReaderPage(theatre);
-      } catch (error) {
-        failures.push(error);
-      }
+      failures.push(
+        ...(error instanceof AggregateError ? error.errors : [error]),
+      );
     }
 
     throw new AggregateError(
@@ -457,7 +442,7 @@ async function fetchLandmarkReaderPage(
   }
 
   const value = fetchLandmarkPageResponse(readerUrl, {
-    headers: buildReaderHeaders(cacheSeconds),
+    headers: buildReaderHeaders(),
   }).then(parseLandmarkPage);
   const entry = {
     expiresAt: now + cacheSeconds * 1_000,
@@ -531,13 +516,10 @@ function parseLandmarkPage(html: string): LandmarkPageContext {
   };
 }
 
-function buildReaderHeaders(cacheSeconds: number): Headers {
+function buildReaderHeaders(): Headers {
   const headers = new Headers({
     Accept: "text/html",
-    "X-Cache-Tolerance": String(cacheSeconds),
-    "X-Engine": "direct",
     "X-Respond-With": "html",
-    "X-Timeout": String(Math.ceil(SOURCE_TIMEOUT_MS / 1_000)),
   });
   const apiKey = process.env.JINA_API_KEY?.trim();
 

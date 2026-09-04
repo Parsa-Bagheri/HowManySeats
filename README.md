@@ -26,10 +26,12 @@ Cineplex or Landmark Cinemas.
 
 ## How it works
 
-The Next.js API routes resolve the search location, find nearby theaters, fetch
-showtimes, and inspect a bounded number of seat maps. Cineplex and Landmark run
-in parallel. If one provider is temporarily unavailable, the app still returns
-results from the other provider.
+The Next.js API routes resolve the search location and return every matching
+showtime from the nearby theaters. Cineplex and Landmark discovery run in
+parallel. The app checks seat maps in bounded batches and lets the visitor check
+more showtimes without repeating the discovery request. If one provider is
+temporarily unavailable, the app shows a warning and returns results from the
+other provider.
 
 The Cineplex client uses these read-only public-site `GET` endpoints:
 
@@ -41,9 +43,9 @@ GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availa
 ```
 
 The Landmark client reads the embedded showtime data from each public theater
-page through Jina Reader's plain HTTP engine. After the server returns matching
-showtimes, the visitor's browser gets seat availability from Landmark's public
-booking API:
+page through Jina Reader's raw HTML response. If that request fails, it tries
+the official page directly. After the server returns matching showtimes, the
+visitor's browser gets seat availability from Landmark's public booking API:
 
 ```text
 GET /showtimes/{theatreSlug}
@@ -97,12 +99,10 @@ Open [http://localhost:3000](http://localhost:3000).
 | --- | --- |
 | `CINEPLEX_APIM_SUBSCRIPTION_KEY` | Optional override for the public Cineplex site API key used by the server |
 | `CINEPLEX_MAX_THEATRES_PER_SEARCH` | Maximum nearby theaters inspected per search; defaults to `5` |
-| `CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH` | Maximum showtime seat maps inspected per search; defaults to `40` |
 | `JINA_API_KEY` | Optional server-side Jina Reader key for a higher Landmark page-fetch rate limit |
 | `LANDMARK_SOURCE_ORIGIN` | Optional comma-separated list of official Landmark source origins |
 | `LANDMARK_READER_CACHE_SECONDS` | Maximum age for cached Landmark theater pages; defaults to `60` and is capped at `300` |
 | `LANDMARK_MAX_THEATRES_PER_SEARCH` | Maximum nearby Landmark theaters inspected per search; defaults to `5` |
-| `LANDMARK_MAX_SEAT_CHECKS_PER_SEARCH` | Maximum Landmark seat maps inspected per search; defaults to `40` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Optional browser-restricted key for Google Maps address suggestions |
 
 For Google address suggestions, enable the Maps JavaScript API and Places API

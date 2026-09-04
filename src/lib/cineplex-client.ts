@@ -13,8 +13,8 @@ import type {
   MovieSuggestion,
   MovieSuggestionQuery,
   RawSeat,
+  SearchCandidate,
   SearchQuery,
-  SearchResult,
   SeatSnapshot,
   Showtime,
   SortOption,
@@ -99,6 +99,17 @@ type ShowtimeCandidate = {
   distanceKm?: number;
 };
 
+export type CineplexSeatSnapshotRequest = {
+  resultId: string;
+  showtimeId: string;
+  theatreId: string;
+};
+
+export type CineplexSeatSnapshotResult = {
+  resultId: string;
+  snapshot: SeatSnapshot;
+};
+
 export class CineplexClient {
   private readonly headers: HeadersInit;
   private readonly now: () => Date;
@@ -115,19 +126,15 @@ export class CineplexClient {
     this.now = now;
   }
 
-  async search(query: SearchQuery): Promise<SearchResult[]> {
+  async search(query: SearchQuery): Promise<SearchCandidate[]> {
     const searchStartedAt = this.now();
     const { origin, theatres } = await this.resolveSearchArea(query);
     const searchDates = getValidatedSearchDates(query);
     const maxTheatres = Number(
       process.env.CINEPLEX_MAX_THEATRES_PER_SEARCH ?? 5,
     );
-    const maxSeatChecks = Number(
-      process.env.CINEPLEX_MAX_SEAT_CHECKS_PER_SEARCH ?? 40,
-    );
     const sortBy = query.sortBy ?? "distance-asc";
     const candidateGroups: ShowtimeCandidate[][] = searchDates.map(() => []);
-    const results: SearchResult[] = [];
 
     const showtimeGroups = await Promise.all(
       theatres.slice(0, maxTheatres).map(async (theatre) => ({
@@ -167,35 +174,9 @@ export class CineplexClient {
           candidate,
         ]),
       ).values(),
-    ).slice(0, maxSeatChecks);
+    );
 
-    for (
-      let offset = 0;
-      offset < candidates.length;
-      offset += SEAT_CHECK_CONCURRENCY
-    ) {
-      const batch = await Promise.all(
-        candidates
-          .slice(offset, offset + SEAT_CHECK_CONCURRENCY)
-          .map(async (candidate) => ({
-            theatre: candidate.theatre,
-            showtime: candidate.showtime,
-            snapshot: await this.getSeatSnapshot(
-              candidate.theatre,
-              candidate.showtime,
-            ),
-            distanceKm: candidate.distanceKm,
-          })),
-      );
-
-      for (const result of batch) {
-        if (this.matchesSnapshotFilters(result, query)) {
-          results.push(result);
-        }
-      }
-    }
-
-    return sortResults(results, sortBy);
+    return sortResults(candidates, sortBy);
   }
 
   async suggestMovieTitles(
@@ -381,16 +362,71 @@ export class CineplexClient {
     theatre: Theatre,
     showtime: Showtime,
   ): Promise<SeatSnapshot> {
+    return this.getSeatSnapshotByIds(
+      theatre.providerTheatreId,
+      showtime.providerShowtimeId,
+    );
+  }
+
+  private async getSeatSnapshotByIds(
+    theatreId: string,
+    showtimeId: string,
+  ): Promise<SeatSnapshot> {
     const [layout, availability] = await Promise.all([
       this.getJson<SeatLayout>(
-        `${TICKETING_API_BASE}/v1/theatre/${theatre.providerTheatreId}/showtime/${showtime.providerShowtimeId}/seat-layout`,
+        `${TICKETING_API_BASE}/v1/theatre/${theatreId}/showtime/${showtimeId}/seat-layout`,
       ),
       this.getJson<SeatAvailability>(
-        `${TICKETING_API_BASE}/v1/theatre/${theatre.providerTheatreId}/showtime/${showtime.providerShowtimeId}/seat-availability?preview=true`,
+        `${TICKETING_API_BASE}/v1/theatre/${theatreId}/showtime/${showtimeId}/seat-availability?preview=true`,
       ),
     ]);
 
     return buildSeatSnapshot(toRawSeats(layout, availability));
+  }
+
+  async getSeatSnapshots(
+    requests: readonly CineplexSeatSnapshotRequest[],
+  ): Promise<{
+    failedResultIds: string[];
+    results: CineplexSeatSnapshotResult[];
+  }> {
+    const failedResultIds: string[] = [];
+    const results: CineplexSeatSnapshotResult[] = [];
+
+    for (
+      let offset = 0;
+      offset < requests.length;
+      offset += SEAT_CHECK_CONCURRENCY
+    ) {
+      const batch = await Promise.allSettled(
+        requests
+          .slice(offset, offset + SEAT_CHECK_CONCURRENCY)
+          .map(async (request) => ({
+            resultId: request.resultId,
+            snapshot: await this.getSeatSnapshotByIds(
+              request.theatreId,
+              request.showtimeId,
+            ),
+          })),
+      );
+
+      batch.forEach((settled, batchIndex) => {
+        const request = requests[offset + batchIndex];
+
+        if (!request) {
+          return;
+        }
+
+        if (settled.status === "fulfilled") {
+          results.push(settled.value);
+        } else {
+          failedResultIds.push(request.resultId);
+          console.error("Cineplex seat request failed", settled.reason);
+        }
+      });
+    }
+
+    return { failedResultIds, results };
   }
 
   private async getJson<T>(url: string, emptyFallback?: T): Promise<T> {
@@ -464,16 +500,6 @@ export class CineplexClient {
     });
   }
 
-  private matchesSnapshotFilters(
-    result: SearchResult,
-    query: SearchQuery,
-  ): boolean {
-    return (
-      (!query.onlyZeroSold || result.snapshot.occupiedEstimate === 0) &&
-      (!query.maxFiveSold || result.snapshot.occupiedEstimate <= 5) &&
-      (!query.accessibleAvailable || result.snapshot.accessibilityCount > 0)
-    );
-  }
 }
 
 function isPastShowtime(showtime: Showtime, now: Date): boolean {
@@ -493,10 +519,10 @@ function getValidatedSearchDates(
   return dates;
 }
 
-function sortResults(
-  results: SearchResult[],
+function sortResults<T extends SearchCandidate>(
+  results: T[],
   sortBy: SortOption,
-): SearchResult[] {
+): T[] {
   return results.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
     const primary = sortBy.startsWith("distance")
