@@ -216,7 +216,17 @@ test("checks seat maps in bounded parallel batches", async (t) => {
     latitude: 43.65,
     longitude: -79.38,
   });
+  const suggestions = await client.suggestMovieTitles({
+    date: "2026-09-01",
+    endDate: "2026-09-02",
+    latitude: 43.65,
+    location: "Toronto",
+    longitude: -79.38,
+    movieTitle: "example",
+    radiusKm: 25,
+  });
 
   assert.equal(results.length, 5);
+  assert.equal(suggestions[0]?.showtimeCount, 5);
   assert.equal(peakSeatRequests, 8);
 });

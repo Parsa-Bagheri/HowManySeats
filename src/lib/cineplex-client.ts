@@ -201,6 +201,7 @@ export class CineplexClient {
   async suggestMovieTitles(
     query: MovieSuggestionQuery,
   ): Promise<MovieSuggestion[]> {
+    const suggestionStartedAt = this.now();
     const terms = normalizeSuggestionTerms(query.movieTitle);
 
     if (!terms.length) {
@@ -229,6 +230,10 @@ export class CineplexClient {
 
     for (const { theatre, showtimes } of showtimeGroups) {
       for (const showtime of showtimes) {
+        if (isPastShowtime(showtime, suggestionStartedAt)) {
+          continue;
+        }
+
         if (!matchesMovieTitle(showtime.movieTitle, terms)) {
           continue;
         }
@@ -425,11 +430,11 @@ export class CineplexClient {
     const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
     return showtimes.filter((showtime) => {
-      const startsAt = new Date(showtime.startsAt);
-
-      if (Number.isNaN(startsAt.getTime()) || startsAt < now) {
+      if (isPastShowtime(showtime, now)) {
         return false;
       }
+
+      const startsAt = new Date(showtime.startsAt);
 
       if (
         movieFilter &&
@@ -469,6 +474,11 @@ export class CineplexClient {
       (!query.accessibleAvailable || result.snapshot.accessibilityCount > 0)
     );
   }
+}
+
+function isPastShowtime(showtime: Showtime, now: Date): boolean {
+  const startsAt = new Date(showtime.startsAt);
+  return Number.isNaN(startsAt.getTime()) || startsAt < now;
 }
 
 function getValidatedSearchDates(

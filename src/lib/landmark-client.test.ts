@@ -142,11 +142,20 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
     longitude: waterloo.longitude,
     radiusKm: 25,
   });
+  const suggestions = await client.suggestMovieTitles({
+    date: "2026-09-01",
+    latitude: waterloo.latitude,
+    location: "Waterloo",
+    longitude: waterloo.longitude,
+    movieTitle: "example",
+    radiusKm: 25,
+  });
 
   assert.equal(pageRequests, 1);
   assert.equal(showtimes.length, 2);
   assert.deepEqual(nextDay, []);
   assert.equal(candidates.length, 1);
+  assert.equal(suggestions[0]?.showtimeCount, 1);
   assert.equal(candidates[0]?.snapshot, undefined);
   assert.equal(showtimes[0]?.id, "landmark-200-11567088");
   assert.equal(showtimes[0]?.providerShowtimeId, "11567088");
@@ -403,6 +412,14 @@ test("uses Vista seat availability and accessibility values", () => {
                 seatFixture("unknown", 6, 5),
                 { ...seatFixture("wheelchair", 7, 0), SeatStyle: 3 },
                 { ...seatFixture("companion", 8, 0), SeatStyle: 7 },
+                {
+                  ...seatFixture("reserved-wheelchair", 9, 4),
+                  OriginalStatus: 3,
+                },
+                {
+                  ...seatFixture("reserved-companion", 10, 4),
+                  OriginalStatus: 7,
+                },
               ],
             },
           ],
@@ -413,7 +430,7 @@ test("uses Vista seat availability and accessibility values", () => {
 
   assert.equal(snapshot.sellableSeats, 3);
   assert.equal(snapshot.occupiedEstimate, 2);
-  assert.equal(snapshot.accessibilityCount, 2);
+  assert.equal(snapshot.accessibilityCount, 4);
 });
 
 test("uses the plain HTTP reader and shares its short-lived page cache", async (t) => {

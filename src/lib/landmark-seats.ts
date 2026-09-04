@@ -11,6 +11,7 @@ type LandmarkSeatRecord = Record<string, unknown> & {
   Column?: number | string;
   Description?: string;
   Id?: number | string;
+  OriginalStatus?: number | string;
   PhysicalName?: number | string;
   Position?: unknown;
   Row?: number | string;
@@ -201,6 +202,7 @@ function getExplicitAccessibilityType(
     .join(" ")
     .toLowerCase();
   const seatStyle = Number(record.SeatStyle);
+  const originalStatus = Number(record.OriginalStatus);
 
   if (/\bwc\d*\b|wheelchair/.test(label) || /wheelchair/.test(details)) {
     return "wheelchair";
@@ -210,11 +212,19 @@ function getExplicitAccessibilityType(
     return "companion";
   }
 
-  if (Number(record.Type) === 2 || seatStyle === 3) {
+  if (
+    Number(record.Type) === 2 ||
+    seatStyle === 3 ||
+    originalStatus === 3
+  ) {
     return "wheelchair";
   }
 
-  if (Number(record.Style) === 4 || seatStyle === 7) {
+  if (
+    Number(record.Style) === 4 ||
+    seatStyle === 7 ||
+    originalStatus === 7
+  ) {
     return "companion";
   }
 

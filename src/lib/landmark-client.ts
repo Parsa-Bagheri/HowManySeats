@@ -192,6 +192,7 @@ export class LandmarkClient {
   private async performSuggestMovieTitles(
     query: MovieSuggestionQuery,
   ): Promise<MovieSuggestion[]> {
+    const suggestionStartedAt = this.now();
     const terms = normalizeSuggestionTerms(query.movieTitle);
 
     if (!terms.length) {
@@ -228,6 +229,10 @@ export class LandmarkClient {
       const { showtimes, theatre } = settled.value;
 
       for (const showtime of showtimes) {
+        if (isPastShowtime(showtime, suggestionStartedAt)) {
+          continue;
+        }
+
         if (!matchesMovieTitle(showtime.movieTitle, terms)) {
           continue;
         }
@@ -668,11 +673,11 @@ function filterShowtimes(
   const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
   return showtimes.filter((showtime) => {
-    const startsAt = new Date(showtime.startsAt);
-
-    if (Number.isNaN(startsAt.getTime()) || startsAt < now) {
+    if (isPastShowtime(showtime, now)) {
       return false;
     }
+
+    const startsAt = new Date(showtime.startsAt);
 
     if (
       movieFilter &&
@@ -700,6 +705,11 @@ function filterShowtimes(
 
     return startsAt <= twoHoursFromNow;
   });
+}
+
+function isPastShowtime(showtime: Showtime, now: Date): boolean {
+  const startsAt = new Date(showtime.startsAt);
+  return Number.isNaN(startsAt.getTime()) || startsAt < now;
 }
 
 function normalizeLandmarkFormat(rawExperiences: string[]): string {
