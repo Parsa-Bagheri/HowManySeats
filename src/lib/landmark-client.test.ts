@@ -10,7 +10,10 @@ import {
   buildLandmarkSeatSnapshot,
   fetchLandmarkSeatSnapshot,
 } from "./landmark-seats";
-import { getLandmarkTheatre } from "./landmark-theatres";
+import {
+  getLandmarkTheatre,
+  LANDMARK_THEATRES,
+} from "./landmark-theatres";
 import { localDateTimeToIso } from "./showtime-time";
 
 const sourceOrigin = "https://source.landmark.test";
@@ -268,6 +271,133 @@ test("does not truncate Landmark showtime candidates at 40", async (t) => {
   assert.equal(results.length, 45);
 });
 
+test("discovers all province theatres with bounded concurrency", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const apiOrigin = "https://all-ontario-movie-api.landmark.test";
+  const ontarioTheatres = LANDMARK_THEATRES.filter(
+    (theatre) => theatre.province === "ON",
+  );
+  let activeMovieRequests = 0;
+  let peakMovieRequests = 0;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url.startsWith(`${apiOrigin}/movies/22/`)) {
+      activeMovieRequests += 1;
+      peakMovieRequests = Math.max(peakMovieRequests, activeMovieRequests);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeMovieRequests -= 1;
+
+      const cinemaId = url.slice(`${apiOrigin}/movies/22/`.length);
+      const numericId = Number(cinemaId);
+
+      return Response.json([
+        {
+          FilmId: numericId + 100000,
+          Sessions: [
+            {
+              NewDate: "2026-09-01",
+              Times: [
+                {
+                  CinemaId: numericId,
+                  ExternalSessionId: numericId + 200000,
+                  Scheduleid: numericId + 300000,
+                  StartTime: "7:30 PM",
+                },
+              ],
+            },
+          ],
+          Title: `Example Movie ${cinemaId}`,
+        },
+      ]);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  const results = await new LandmarkClient(
+    apiOrigin,
+    () => new Date("2026-08-31T12:00:00.000Z"),
+  ).search({
+    date: "2026-09-01",
+    location: "ON",
+    radiusKm: 25,
+  });
+
+  assert.ok(ontarioTheatres.length > 5);
+  assert.equal(results.length, ontarioTheatres.length);
+  assert.equal(
+    new Set(results.map((result) => result.theatre.providerTheatreId)).size,
+    ontarioTheatres.length,
+  );
+  assert.equal(peakMovieRequests, 6);
+});
+
+test("keeps healthy Landmark theatres when one request fails", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const apiOrigin = "https://partial-movie-api.landmark.test";
+  const ontarioTheatres = LANDMARK_THEATRES.filter(
+    (theatre) => theatre.province === "ON",
+  );
+  const failedCinemaId = ontarioTheatres[0]?.providerTheatreId;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    const cinemaId = url.slice(`${apiOrigin}/movies/22/`.length);
+
+    if (cinemaId === failedCinemaId) {
+      return Response.json({ error: "Unavailable" }, { status: 503 });
+    }
+
+    const numericId = Number(cinemaId);
+    return Response.json([
+      {
+        FilmId: numericId + 100000,
+        Sessions: [
+          {
+            NewDate: "2026-09-01",
+            Times: [
+              {
+                CinemaId: numericId,
+                ExternalSessionId: numericId + 200000,
+                Scheduleid: numericId + 300000,
+                StartTime: "7:30 PM",
+              },
+            ],
+          },
+        ],
+        Title: `Example Movie ${cinemaId}`,
+      },
+    ]);
+  };
+
+  const client = new LandmarkClient(
+    apiOrigin,
+    () => new Date("2026-08-31T12:00:00.000Z"),
+  );
+  const results = await client.search({
+    date: "2026-09-01",
+    location: "ON",
+    radiusKm: 25,
+  });
+
+  assert.equal(results.length, ontarioTheatres.length - 1);
+  assert.equal(client.wasLastSearchPartial(), true);
+  assert.ok(
+    results.every(
+      (result) => result.theatre.providerTheatreId !== failedCinemaId,
+    ),
+  );
+});
+
 test("requests showtimes from Landmark's official movie API", async (t) => {
   const originalFetch = globalThis.fetch;
   const requests: string[] = [];
@@ -345,7 +475,10 @@ test("gets Landmark booking API data and normalizes its seat map", async (t) => 
   assert.equal(seatRequest?.headers.get("accept"), "application/json");
   assert.equal(snapshot.sellableSeats, 2);
   assert.equal(snapshot.occupiedEstimate, 1);
-  assert.equal(snapshot.accessibilityCount, 2);
+  assert.equal(snapshot.accessibleSeats, 1);
+  assert.equal(snapshot.occupiedAccessibleSeats, 0);
+  assert.equal(snapshot.companionSeats, 1);
+  assert.equal(snapshot.occupiedCompanionSeats, 0);
 });
 
 test("counts repeated Landmark seat IDs by their auditorium position", async (t) => {
@@ -469,7 +602,10 @@ test("counts repeated Landmark seat IDs by their auditorium position", async (t)
     snapshot.sellableSeats - snapshot.occupiedEstimate,
     38,
   );
-  assert.equal(snapshot.accessibilityCount, 6);
+  assert.equal(snapshot.accessibleSeats, 3);
+  assert.equal(snapshot.occupiedAccessibleSeats, 0);
+  assert.equal(snapshot.companionSeats, 3);
+  assert.equal(snapshot.occupiedCompanionSeats, 0);
 });
 
 test("reads canonical Vista seat positions", async (t) => {
@@ -556,7 +692,10 @@ test("uses Vista seat availability and accessibility values", () => {
 
   assert.equal(snapshot.sellableSeats, 3);
   assert.equal(snapshot.occupiedEstimate, 2);
-  assert.equal(snapshot.accessibilityCount, 4);
+  assert.equal(snapshot.accessibleSeats, 2);
+  assert.equal(snapshot.occupiedAccessibleSeats, 1);
+  assert.equal(snapshot.companionSeats, 2);
+  assert.equal(snapshot.occupiedCompanionSeats, 1);
 });
 
 test("shares the official movie API's short-lived cache", async (t) => {

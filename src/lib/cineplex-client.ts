@@ -26,6 +26,8 @@ const TICKETING_API_BASE = "https://apis.cineplex.com/prod/ticketing/api";
 const PUBLIC_SITE_KEY = "dcdac5601d864addbc2675a2e96cb1f8";
 const REQUEST_TIMEOUT_MS = 8_000;
 const SEAT_CHECK_CONCURRENCY = 8;
+const SHOWTIME_DISCOVERY_CONCURRENCY = 6;
+const SHOWTIME_DISCOVERY_BUDGET_MS = 32_000;
 const MAX_SUGGESTION_THEATRES = 8;
 
 type CineplexTheatresResponse = {
@@ -114,6 +116,7 @@ export type CineplexSeatSnapshotResult = {
 export class CineplexClient {
   private readonly headers: HeadersInit;
   private readonly now: () => Date;
+  private lastSearchPartial = false;
 
   constructor(
     subscriptionKey = process.env.CINEPLEX_APIM_SUBSCRIPTION_KEY ||
@@ -128,39 +131,49 @@ export class CineplexClient {
   }
 
   async search(query: SearchQuery): Promise<SearchCandidate[]> {
+    this.lastSearchPartial = false;
     const searchStartedAt = this.now();
     const { origin, theatres } = await this.resolveSearchArea(query);
     const searchDates = getValidatedSearchDates(query);
-    const maxTheatres = Number(
-      process.env.CINEPLEX_MAX_THEATRES_PER_SEARCH ?? 5,
-    );
     const sortBy = query.sortBy ?? "distance-asc";
     const candidateGroups: ShowtimeCandidate[][] = searchDates.map(() => []);
 
-    const showtimeGroups = await Promise.all(
-      theatres.slice(0, maxTheatres).map(async (theatre) => ({
-        theatre,
-        showtimesByDate: await Promise.all(
-          searchDates.map((date) => this.getShowtimes(theatre, date)),
-        ),
-      })),
+    const discoveryTasks = theatres.flatMap((theatre) =>
+      searchDates.map((date, dateIndex) => ({ date, dateIndex, theatre })),
     );
+    const discovery = await mapSettledWithConcurrency(
+      discoveryTasks,
+      SHOWTIME_DISCOVERY_CONCURRENCY,
+      Date.now() + SHOWTIME_DISCOVERY_BUDGET_MS,
+      async ({ date, dateIndex, theatre }) => {
+        const showtimes = await this.getShowtimes(theatre, date);
+        return { dateIndex, showtimes, theatre };
+      },
+    );
+    const { failures, results: showtimeGroups } = discovery;
 
-    for (const { theatre, showtimesByDate } of showtimeGroups) {
-      for (const [dateIndex, showtimes] of showtimesByDate.entries()) {
-        const matchingShowtimes = this.filterShowtimes(
-          showtimes,
-          query,
-          searchStartedAt,
-        );
+    if (discoveryTasks.length > 0 && failures === discoveryTasks.length) {
+      throw new Error("Cineplex showtimes are temporarily unavailable.");
+    }
 
-        for (const showtime of matchingShowtimes) {
-          candidateGroups[dateIndex].push({
-            theatre,
-            showtime,
-            distanceKm: getDistanceFromOrigin(origin, theatre),
-          });
-        }
+    if (failures > 0) {
+      this.lastSearchPartial = true;
+      console.warn(`Skipped ${failures} unavailable Cineplex showtime requests.`);
+    }
+
+    for (const { dateIndex, showtimes, theatre } of showtimeGroups) {
+      const matchingShowtimes = this.filterShowtimes(
+        showtimes,
+        query,
+        searchStartedAt,
+      );
+
+      for (const showtime of matchingShowtimes) {
+        candidateGroups[dateIndex].push({
+          theatre,
+          showtime,
+          distanceKm: getDistanceFromOrigin(origin, theatre),
+        });
       }
     }
 
@@ -178,6 +191,10 @@ export class CineplexClient {
     );
 
     return sortResults(candidates, sortBy);
+  }
+
+  wasLastSearchPartial(): boolean {
+    return this.lastSearchPartial;
   }
 
   async suggestMovieTitles(
@@ -526,6 +543,46 @@ function getValidatedSearchDates(
   }
 
   return dates;
+}
+
+async function mapSettledWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  deadline: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<{ failures: number; results: R[] }> {
+  const results = new Array<R | undefined>(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), values.length);
+
+  async function worker(): Promise<void> {
+    while (true) {
+      if (Date.now() >= deadline) {
+        return;
+      }
+
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= values.length) {
+        return;
+      }
+
+      try {
+        results[index] = await mapper(values[index], index);
+      } catch {
+        // Keep successful theatre/date requests when another one fails.
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker()),
+  );
+  const fulfilled = results.filter(
+    (result): result is R => result !== undefined,
+  );
+  return { failures: values.length - fulfilled.length, results: fulfilled };
 }
 
 function sortResults<T extends SearchCandidate>(

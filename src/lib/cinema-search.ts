@@ -12,6 +12,7 @@ import type {
 export type CinemaProviderClient = {
   search(query: SearchQuery): Promise<SearchCandidate[]>;
   suggestMovieTitles(query: MovieSuggestionQuery): Promise<MovieSuggestion[]>;
+  wasLastSearchPartial?(): boolean;
 };
 
 export type ProviderEntry = {
@@ -20,6 +21,7 @@ export type ProviderEntry = {
 };
 
 export type CinemaSearchResult = {
+  partialResults: boolean;
   results: SearchCandidate[];
   unavailableProviders: CinemaProvider[];
 };
@@ -42,11 +44,14 @@ export class CinemaSearch {
     );
     const results: SearchCandidate[] = [];
     const failures: unknown[] = [];
+    let partialResults = false;
     const unavailableProviders: CinemaProvider[] = [];
 
     settled.forEach((result, index) => {
       if (result.status === "fulfilled") {
         results.push(...result.value);
+        partialResults ||=
+          this.providers[index]?.client.wasLastSearchPartial?.() ?? false;
         return;
       }
 
@@ -67,6 +72,7 @@ export class CinemaSearch {
       new Map(results.map((result) => [result.showtime.id, result])).values(),
     );
     return {
+      partialResults,
       results: sortResults(deduped, query.sortBy ?? "distance-asc"),
       unavailableProviders,
     };

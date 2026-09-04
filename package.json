@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test src/app/api/cineplex-seats/route.test.ts src/lib/browser-cinema-search.test.ts src/lib/cinema-search.test.ts src/lib/cineplex-client.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/landmark-client.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts",
+    "test": "node --import tsx --test src/app/api/cineplex-seats/route.test.ts src/lib/browser-cinema-search.test.ts src/lib/cinema-search.test.ts src/lib/cineplex-client.test.ts src/lib/client-search-results.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/landmark-client.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

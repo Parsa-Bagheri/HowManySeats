@@ -27,7 +27,8 @@ const LANDMARK_MOVIE_API_ORIGIN = "https://movieapi.landmarkcinemas.com";
 const LANDMARK_CIRCUIT_ID = "22";
 const DEFAULT_MOVIE_CACHE_SECONDS = 60;
 const MAX_MOVIE_CACHE_ENTRIES = 16;
-const MAX_THEATRES_PER_SEARCH = 5;
+const SHOWTIME_DISCOVERY_CONCURRENCY = 6;
+const SHOWTIME_DISCOVERY_BUDGET_MS = 30_000;
 const MAX_SUGGESTION_THEATRES = 8;
 const SOURCE_TIMEOUT_MS = 15_000;
 
@@ -81,6 +82,7 @@ export class LandmarkClient {
   private readonly movieApiOrigin: string;
   private readonly now: () => Date;
   private readonly signal?: AbortSignal;
+  private lastSearchPartial = false;
 
   constructor(
     movieApiOrigin = LANDMARK_MOVIE_API_ORIGIN,
@@ -93,7 +95,12 @@ export class LandmarkClient {
   }
 
   async search(query: SearchQuery): Promise<SearchCandidate[]> {
+    this.lastSearchPartial = false;
     return this.performSearch(query);
+  }
+
+  wasLastSearchPartial(): boolean {
+    return this.lastSearchPartial;
   }
 
   private async performSearch(query: SearchQuery): Promise<SearchCandidate[]> {
@@ -102,54 +109,56 @@ export class LandmarkClient {
     const searchDates = getValidatedSearchDates(query);
     const sortBy = query.sortBy ?? "distance-asc";
     const candidateGroups: ShowtimeCandidate[][] = searchDates.map(() => []);
-    const selectedTheatres = theatres.slice(0, MAX_THEATRES_PER_SEARCH);
-    const showtimeSettled = await Promise.allSettled(
-      selectedTheatres.map(async (theatre) => ({
-        showtimesByDate: await Promise.all(
-          searchDates.map((date) => this.getShowtimes(theatre, date)),
-        ),
-        theatre,
-      })),
+    const discoveryTasks = theatres.flatMap((theatre) =>
+      searchDates.map((date, dateIndex) => ({ date, dateIndex, theatre })),
+    );
+    const showtimeSettled = await mapWithConcurrencySettled(
+      discoveryTasks,
+      SHOWTIME_DISCOVERY_CONCURRENCY,
+      Date.now() + SHOWTIME_DISCOVERY_BUDGET_MS,
+      async ({ date, dateIndex, theatre }) => {
+        const showtimes = await this.getShowtimes(theatre, date);
+        return { dateIndex, showtimes, theatre };
+      },
+    );
+    const failures = showtimeSettled.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
     );
 
     if (
-      selectedTheatres.length > 0 &&
-      showtimeSettled.every((result) => result.status === "rejected")
+      discoveryTasks.length > 0 &&
+      failures.length === discoveryTasks.length
     ) {
-      const failures = showtimeSettled.flatMap((result) =>
-        result.status === "rejected" ? [result.reason] : [],
-      );
-
-      for (const failure of failures) {
-        console.error("Landmark theatre request failed", failure);
-      }
-
       throw new AggregateError(
         failures,
         "Landmark showtimes are unavailable.",
       );
     }
 
+    if (failures.length > 0) {
+      this.lastSearchPartial = true;
+      console.warn(
+        `Skipped ${failures.length} unavailable Landmark showtime requests.`,
+      );
+    }
+
     for (const settled of showtimeSettled) {
       if (settled.status === "rejected") {
-        console.error("Landmark theatre request failed", settled.reason);
         continue;
       }
 
-      const { theatre, showtimesByDate } = settled.value;
+      const { dateIndex, showtimes, theatre } = settled.value;
 
-      for (const [dateIndex, showtimes] of showtimesByDate.entries()) {
-        for (const showtime of filterShowtimes(
-          showtimes,
-          query,
-          searchStartedAt,
-        )) {
-          candidateGroups[dateIndex].push({
-            distanceKm: getDistanceFromOrigin(origin, theatre),
-            showtime,
-            theatre,
-          });
-        }
+      for (const showtime of filterShowtimes(
+        showtimes,
+        query,
+        searchStartedAt,
+      )) {
+        candidateGroups[dateIndex].push({
+          distanceKm: getDistanceFromOrigin(origin, theatre),
+          showtime,
+          theatre,
+        });
       }
     }
 
@@ -621,6 +630,54 @@ function getValidatedSearchDates(
   }
 
   return dates;
+}
+
+async function mapWithConcurrencySettled<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  deadline: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results = new Array<PromiseSettledResult<R>>(values.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), values.length);
+
+  async function worker(): Promise<void> {
+    while (true) {
+      if (Date.now() >= deadline) {
+        return;
+      }
+
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= values.length) {
+        return;
+      }
+
+      try {
+        results[index] = {
+          status: "fulfilled",
+          value: await mapper(values[index], index),
+        };
+      } catch (reason) {
+        results[index] = { reason, status: "rejected" };
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => worker()),
+  );
+
+  for (let index = 0; index < results.length; index += 1) {
+    results[index] ??= {
+      reason: new Error("Landmark showtime discovery timed out."),
+      status: "rejected",
+    };
+  }
+
+  return results;
 }
 
 function filterShowtimes(

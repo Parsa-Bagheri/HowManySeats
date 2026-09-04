@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildSearchParams,
   getEffectiveFilters,
+  getSearchScopeKey,
   makeDefaultSearchState,
   normalizeSearchState,
   readSearchStateFromUrl,
@@ -54,4 +55,32 @@ test("replaces an invalid URL date with today's date", () => {
 
   assert.equal(normalized.date, TODAY);
   assert.equal(normalized.endDate, TODAY);
+});
+
+test("search scope changes only for location, coordinates, radius, or dates", () => {
+  const state = {
+    ...makeDefaultSearchState(TODAY),
+    latitude: 0,
+    location: "  Waterloo   ON ",
+    longitude: 0,
+  };
+  const key = getSearchScopeKey(state);
+
+  assert.equal(
+    getSearchScopeKey({
+      ...state,
+      experienceTypes: ["IMAX"],
+      filters: { ...state.filters, onlyZeroSold: true },
+      movieTitle: "Example",
+      sortBy: "time-desc",
+    }),
+    key,
+  );
+  assert.equal(
+    getSearchScopeKey({ ...state, location: "waterloo on" }),
+    key,
+  );
+  assert.notEqual(getSearchScopeKey({ ...state, latitude: 1 }), key);
+  assert.notEqual(getSearchScopeKey({ ...state, radiusKm: "50" }), key);
+  assert.notEqual(getSearchScopeKey({ ...state, endDate: "2026-08-31" }), key);
 });

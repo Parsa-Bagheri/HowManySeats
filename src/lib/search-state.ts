@@ -98,6 +98,17 @@ export function buildSearchParams(state: SearchState): URLSearchParams {
   return params;
 }
 
+export function getSearchScopeKey(state: SearchState): string {
+  return JSON.stringify({
+    date: state.date,
+    endDate: state.endDate,
+    latitude: state.latitude ?? null,
+    location: state.location.trim().toLowerCase().replace(/\s+/g, " "),
+    longitude: state.longitude ?? null,
+    radiusKm: Number(state.radiusKm),
+  });
+}
+
 export function normalizeSearchState(
   state: StoredSearchState,
   today = getLocalDateInputValue(),

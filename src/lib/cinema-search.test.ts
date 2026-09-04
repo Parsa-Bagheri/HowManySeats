@@ -33,6 +33,7 @@ test("keeps results from an available provider when another provider fails", asy
   ]);
 
   assert.deepEqual(await search.search(query), {
+    partialResults: false,
     results: [result],
     unavailableProviders: ["cineplex"],
   });
@@ -85,6 +86,7 @@ test("merges and sorts results from all available providers", async () => {
     ["cineplex", "landmark"],
   );
   assert.deepEqual(searchResult.unavailableProviders, []);
+  assert.equal(searchResult.partialResults, false);
   assert.deepEqual(
     await search.suggestMovieTitles({ ...query, movieTitle: "example" }),
     [
@@ -114,11 +116,24 @@ test("fails only when every cinema provider is unavailable", async (t) => {
   await assert.rejects(() => search.search(query), /Cinema searches/);
 });
 
+test("reports partial provider results", async () => {
+  const search = new CinemaSearch([
+    {
+      client: providerClient({ partial: true, results: [makeResult()] }),
+      provider: "landmark",
+    },
+  ]);
+
+  assert.equal((await search.search(query)).partialResults, true);
+});
+
 function providerClient({
   error,
+  partial = false,
   results = [],
 }: {
   error?: Error;
+  partial?: boolean;
   results?: SearchResult[];
 }): CinemaProviderClient {
   return {
@@ -137,6 +152,9 @@ function providerClient({
       return [
         { showtimeCount: 1, theatreCount: 1, title: "Example Movie" },
       ];
+    },
+    wasLastSearchPartial() {
+      return partial;
     },
   };
 }
@@ -158,7 +176,11 @@ function makeResult(): SearchResult {
     },
     snapshot: {
       accessibilityCount: 2,
+      accessibleSeats: 2,
       checkedAt: "2026-09-01T18:00:00.000Z",
+      companionSeats: 0,
+      occupiedAccessibleSeats: 0,
+      occupiedCompanionSeats: 0,
       occupiedEstimate: 1,
       sellableSeats: 40,
     },

@@ -35,6 +35,18 @@ export type SeatSnapshot = {
   checkedAt: string;
   sellableSeats: number;
   occupiedEstimate: number;
+  /** Total sellable wheelchair-accessible seats. */
+  accessibleSeats: number;
+  /** Occupied wheelchair-accessible seats included in accessibleSeats. */
+  occupiedAccessibleSeats: number;
+  /** Total sellable companion seats. */
+  companionSeats: number;
+  /** Occupied companion seats included in companionSeats. */
+  occupiedCompanionSeats: number;
+  /**
+   * Retained for consumers that still display the combined accessible total.
+   * New accessibility checks should use accessibleSeats and occupiedAccessibleSeats.
+   */
   accessibilityCount: number;
 };
 

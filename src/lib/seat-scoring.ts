@@ -1,7 +1,8 @@
 import type { RawSeat, SeatSnapshot } from "./types";
 
-const ACCESSIBLE_SEAT_TYPES = new Set(["wheelchair", "companion"]);
 const OCCUPIED_SEAT_STATUSES = new Set(["occupied", "sold", "held", "reserved"]);
+
+type SeatCategory = "standard" | "accessible" | "companion";
 
 export function buildSeatSnapshot(
   rawSeats: RawSeat[],
@@ -9,23 +10,35 @@ export function buildSeatSnapshot(
 ): SeatSnapshot {
   let sellableSeats = 0;
   let occupiedEstimate = 0;
-  let accessibilityCount = 0;
+  let accessibleSeats = 0;
+  let occupiedAccessibleSeats = 0;
+  let companionSeats = 0;
+  let occupiedCompanionSeats = 0;
 
   for (const seat of rawSeats) {
-    const type = seat.type?.trim().toLowerCase();
+    const status = seat.status?.trim().toLowerCase();
+    const category = getSeatCategory(seat.type);
+    const occupied = Boolean(status && OCCUPIED_SEAT_STATUSES.has(status));
 
-    if (type && ACCESSIBLE_SEAT_TYPES.has(type)) {
-      accessibilityCount += 1;
+    if (status !== "available" && !occupied) {
       continue;
     }
 
-    const status = seat.status?.trim().toLowerCase();
-
-    if (status === "available") {
+    if (category === "accessible") {
+      accessibleSeats += 1;
+      if (occupied) {
+        occupiedAccessibleSeats += 1;
+      }
+    } else if (category === "companion") {
+      companionSeats += 1;
+      if (occupied) {
+        occupiedCompanionSeats += 1;
+      }
+    } else {
       sellableSeats += 1;
-    } else if (status && OCCUPIED_SEAT_STATUSES.has(status)) {
-      sellableSeats += 1;
-      occupiedEstimate += 1;
+      if (occupied) {
+        occupiedEstimate += 1;
+      }
     }
   }
 
@@ -33,6 +46,21 @@ export function buildSeatSnapshot(
     checkedAt: checkedAt.toISOString(),
     sellableSeats,
     occupiedEstimate,
-    accessibilityCount,
+    accessibleSeats,
+    occupiedAccessibleSeats,
+    companionSeats,
+    occupiedCompanionSeats,
+    accessibilityCount: accessibleSeats + companionSeats,
   };
+}
+
+function getSeatCategory(type: string | undefined): SeatCategory {
+  switch (type?.trim().toLowerCase()) {
+    case "wheelchair":
+      return "accessible";
+    case "companion":
+      return "companion";
+    default:
+      return "standard";
+  }
 }

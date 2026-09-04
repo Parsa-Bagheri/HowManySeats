@@ -314,3 +314,178 @@ test("does not truncate showtime candidates at 40", async (t) => {
   assert.equal(results.length, 45);
   assert.equal(seatRequests, 0);
 });
+
+test("discovers all nearby theatres with bounded concurrency", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const theatreCount = 7;
+  let activeShowtimeRequests = 0;
+  let peakShowtimeRequests = 0;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url.includes("/v1/theatres?")) {
+      return Response.json({
+        nearbyTheatres: Array.from({ length: theatreCount }, (_, index) => ({
+          location: {
+            city: "Toronto",
+            geoLocation: {
+              latitude: 43.65 + index * 0.001,
+              longitude: -79.38,
+            },
+            provinceCode: "ON",
+          },
+          theatreId: 7402 + index,
+          theatreName: `Example Theatre ${index}`,
+        })),
+      });
+    }
+
+    if (url.includes("/v1/showtimes?")) {
+      activeShowtimeRequests += 1;
+      peakShowtimeRequests = Math.max(
+        peakShowtimeRequests,
+        activeShowtimeRequests,
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeShowtimeRequests -= 1;
+
+      const theatreId = new URL(url).searchParams.get("locationId");
+      const sessionId = Number(theatreId) + 1000;
+
+      return Response.json([
+        {
+          dates: [
+            {
+              movies: [
+                {
+                  experiences: [
+                    {
+                      experienceTypes: ["Regular"],
+                      sessions: [
+                        {
+                          isReservedSeating: true,
+                          showStartDateTime: "2026-09-01T20:00:00",
+                          vistaSessionId: sessionId,
+                        },
+                      ],
+                    },
+                  ],
+                  name: `Example Movie ${theatreId}`,
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  const results = await new CineplexClient(
+    "test-key",
+    () => new Date("2026-08-31T12:00:00.000Z"),
+  ).search({
+    date: "2026-09-01",
+    latitude: 43.65,
+    location: "Toronto",
+    longitude: -79.38,
+    radiusKm: 25,
+  });
+
+  assert.equal(results.length, theatreCount);
+  assert.equal(
+    new Set(results.map((result) => result.theatre.providerTheatreId)).size,
+    theatreCount,
+  );
+  assert.equal(peakShowtimeRequests, 6);
+});
+
+test("keeps showtimes from healthy theatres when one theatre fails", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const theatreCount = 7;
+  const failedTheatreId = "7405";
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+
+    if (url.includes("/v1/theatres?")) {
+      return Response.json({
+        nearbyTheatres: Array.from({ length: theatreCount }, (_, index) => ({
+          location: {
+            city: "Toronto",
+            geoLocation: {
+              latitude: 43.65 + index * 0.001,
+              longitude: -79.38,
+            },
+            provinceCode: "ON",
+          },
+          theatreId: 7402 + index,
+          theatreName: `Example Theatre ${index}`,
+        })),
+      });
+    }
+
+    if (url.includes("/v1/showtimes?")) {
+      const theatreId = new URL(url).searchParams.get("locationId");
+
+      if (theatreId === failedTheatreId) {
+        return Response.json({ error: "Unavailable" }, { status: 503 });
+      }
+
+      return Response.json([
+        {
+          dates: [
+            {
+              movies: [
+                {
+                  experiences: [
+                    {
+                      experienceTypes: ["Regular"],
+                      sessions: [
+                        {
+                          isReservedSeating: true,
+                          showStartDateTime: "2026-09-01T20:00:00",
+                          vistaSessionId: Number(theatreId) + 1000,
+                        },
+                      ],
+                    },
+                  ],
+                  name: `Example Movie ${theatreId}`,
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    }
+
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  const results = await new CineplexClient(
+    "test-key",
+    () => new Date("2026-08-31T12:00:00.000Z"),
+  ).search({
+    date: "2026-09-01",
+    latitude: 43.65,
+    location: "Toronto",
+    longitude: -79.38,
+    radiusKm: 25,
+  });
+
+  assert.equal(results.length, theatreCount - 1);
+  assert.ok(
+    results.every(
+      (result) => result.theatre.providerTheatreId !== failedTheatreId,
+    ),
+  );
+});

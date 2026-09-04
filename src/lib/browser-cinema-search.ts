@@ -1,6 +1,5 @@
 import { LandmarkClient } from "./landmark-client";
 import {
-  buildSearchParams,
   getEffectiveFilters,
   type SearchState,
 } from "./search-state";
@@ -12,6 +11,7 @@ import type {
 } from "./types";
 
 type BrowserCinemaSearchResult = {
+  partialResults: boolean;
   results: SearchCandidate[];
   unavailableProviders: CinemaProvider[];
 };
@@ -19,7 +19,8 @@ type BrowserCinemaSearchResult = {
 type LandmarkBrowserClient = Pick<
   LandmarkClient,
   "search" | "suggestMovieTitles"
->;
+> &
+  Partial<Pick<LandmarkClient, "wasLastSearchPartial">>;
 
 export async function searchBrowserCinemas(
   state: SearchState,
@@ -30,18 +31,21 @@ export async function searchBrowserCinemas(
     signal,
   ),
 ): Promise<BrowserCinemaSearchResult> {
-  const params = buildSearchParams(state);
+  const discoveryState = makeDiscoveryState(state);
+  const params = buildDiscoverySearchParams(discoveryState);
   const [cineplex, landmark] = await Promise.allSettled([
     fetchCineplexCandidates(params, signal),
-    landmarkClient.search(toSearchQuery(state)),
+    landmarkClient.search(toSearchQuery(discoveryState)),
   ]);
   throwIfAborted(signal);
   const results: SearchCandidate[] = [];
   const unavailableProviders = new Set<CinemaProvider>();
   const failures: unknown[] = [];
+  let partialResults = false;
 
   if (cineplex.status === "fulfilled") {
     results.push(...cineplex.value.results);
+    partialResults ||= cineplex.value.partialResults;
 
     for (const provider of cineplex.value.unavailableProviders) {
       unavailableProviders.add(provider);
@@ -53,6 +57,7 @@ export async function searchBrowserCinemas(
 
   if (landmark.status === "fulfilled") {
     results.push(...landmark.value);
+    partialResults ||= landmarkClient.wasLastSearchPartial?.() ?? false;
   } else {
     unavailableProviders.add("landmark");
     failures.push(landmark.reason);
@@ -63,10 +68,43 @@ export async function searchBrowserCinemas(
   }
 
   return {
+    partialResults,
     results: Array.from(
       new Map(results.map((result) => [result.showtime.id, result])).values(),
     ),
     unavailableProviders: Array.from(unavailableProviders),
+  };
+}
+
+function buildDiscoverySearchParams(state: SearchState): URLSearchParams {
+  const params = new URLSearchParams({
+    date: state.date,
+    endDate: state.endDate,
+    location: state.location,
+    radiusKm: state.radiusKm,
+  });
+
+  if (state.latitude !== undefined && state.longitude !== undefined) {
+    params.set("latitude", String(state.latitude));
+    params.set("longitude", String(state.longitude));
+  }
+
+  return params;
+}
+
+function makeDiscoveryState(state: SearchState): SearchState {
+  return {
+    ...state,
+    experienceTypes: [],
+    filters: {
+      accessibleAvailable: false,
+      maxFiveSold: false,
+      nonVipOnly: false,
+      onlyZeroSold: false,
+      startsInNextTwoHours: false,
+    },
+    movieTitle: "",
+    sortBy: "distance-asc",
   };
 }
 
@@ -209,6 +247,7 @@ function isBrowserCinemaSearchResult(
 
   return (
     Array.isArray(value.results) &&
+    typeof value.partialResults === "boolean" &&
     Array.isArray(value.unavailableProviders) &&
     value.unavailableProviders.every(isCinemaProvider)
   );

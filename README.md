@@ -22,16 +22,17 @@ Cineplex or Landmark Cinemas.
   within two hours, non-VIP showtimes, and accessible seating
 - Distance and start-time sorting
 - Direct links to each cinema's public purchase flow and seat-map preview
-- Counts for sellable, occupied, and accessible seats
+- Separate totals and occupied counts for standard, accessible, and companion
+  seats
 
 ## How it works
 
-The Next.js API routes resolve the search location and return every matching
-showtime from the nearby theaters. Cineplex and Landmark discovery run in
-parallel. The app checks seat maps in bounded batches and lets the visitor check
-more showtimes without repeating the discovery request. If one provider is
-temporarily unavailable, the app shows a warning and returns results from the
-other provider.
+The Next.js API routes resolve the search location and return showtimes in the
+selected area. Cineplex and Landmark discovery run in parallel. The app
+checks the relevant seat maps automatically in bounded batches, caches the
+results, and applies filters locally. It repeats discovery only when the
+location, radius, or dates change. If a provider or individual request is
+temporarily unavailable, the app warns that results may be partial.
 
 The Cineplex client uses these read-only public-site `GET` endpoints:
 
@@ -65,8 +66,11 @@ The estimate comes from the current preview seat map:
 - `Available` standard seats count as open.
 - `Occupied`, `Sold`, `Held`, and `Reserved` standard seats count toward the
   occupied estimate.
-- Wheelchair and companion seats count as accessible seats. Broken, house, and
-  unknown seat statuses are excluded from the estimate.
+- Wheelchair-accessible and companion seats have their own totals and occupied
+  counts. They don't affect the standard-seat occupancy filters.
+- The accessible-seating filter requires at least one open wheelchair space;
+  an open companion seat alone doesn't satisfy it.
+- Broken, house, and unknown seat statuses are excluded from the estimate.
 
 Seat availability can change at any time. Treat the numbers as a snapshot, not
 as a guarantee from either cinema provider.
@@ -94,7 +98,6 @@ Open [http://localhost:3000](http://localhost:3000).
 | Variable | Purpose |
 | --- | --- |
 | `CINEPLEX_APIM_SUBSCRIPTION_KEY` | Optional override for the public Cineplex site API key used by the server |
-| `CINEPLEX_MAX_THEATRES_PER_SEARCH` | Maximum nearby theaters inspected per search; defaults to `5` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Optional browser-restricted key for Google Maps address suggestions |
 
 For Google address suggestions, enable the Maps JavaScript API and Places API

@@ -24,6 +24,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -32,6 +33,10 @@ import {
   searchBrowserCinemas,
   suggestBrowserMovieTitles,
 } from "@/lib/browser-cinema-search";
+import {
+  filterAndSortSearchResults,
+  matchesCandidateFilters,
+} from "@/lib/client-search-results";
 import {
   addDays,
   formatDateRangeLabel,
@@ -45,6 +50,7 @@ import {
   buildSearchParams,
   getEffectiveFilters,
   getLocalDateInputValue,
+  getSearchScopeKey,
   makeDefaultSearchState,
   normalizeSearchState,
   readSearchStateFromUrl,
@@ -105,26 +111,25 @@ type SearchViewProps = {
   activeFilterCount: number;
   error: string | undefined;
   form: SearchFormProps;
-  hasMoreResults: boolean;
   hasSearched: boolean;
-  loadingMore: boolean;
   onDismissThemePrompt: () => void;
-  onLoadMoreResults: () => void;
+  resultState: SearchState;
   results: SearchResult[];
+  searchProgress: SearchProgress;
   setUiMode: (mode: UiMode) => void;
   showThemePrompt: boolean;
   uiMode: UiMode;
   warning: string | undefined;
 };
 
-type PendingSeatSearch = {
-  candidates: SearchCandidate[];
-  controller: AbortController;
-  hadSeatFailures: boolean;
-  offset: number;
-  requestId: number;
+type SearchProgress = {
+  checked: number;
+  total: number;
+};
+
+type PendingHydration = {
+  searchId: number;
   state: SearchState;
-  unavailableProviders: CinemaProvider[];
 };
 
 type FilterOption = {
@@ -155,7 +160,7 @@ const SORT_LABELS = {
 const THEME_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const FUN_RESULT_BATCH_SIZE = 12;
-const SEAT_RESULT_BATCH_SIZE = 40;
+const SEAT_HYDRATION_BATCH_SIZE = 40;
 const LANDMARK_SEAT_CHECK_CONCURRENCY = 6;
 
 const funInputClass =
@@ -176,13 +181,18 @@ export default function HomePageClient({
   );
   const [movieSuggestionsLoading, setMovieSuggestionsLoading] = useState(false);
   const [movieSuggestionsOpen, setMovieSuggestionsOpen] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [loadedResults, setLoadedResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMoreResults, setHasMoreResults] = useState(false);
+  const [searchProgress, setSearchProgress] = useState<SearchProgress>({
+    checked: 0,
+    total: 0,
+  });
   const [error, setError] = useState<string | undefined>();
   const [warning, setWarning] = useState<string | undefined>();
   const [hasSearched, setHasSearched] = useState(false);
+  const [searchedState, setSearchedState] = useState<SearchState | undefined>(
+    undefined,
+  );
   const [uiMode, setUiModeState] = useState<UiMode>(initialUiMode);
   const [showThemePrompt, setShowThemePrompt] = useState(false);
   const loadedSavedState = useRef(false);
@@ -190,9 +200,21 @@ export default function HomePageClient({
   const skipNextMovieSuggestionFetch = useRef(false);
   const activeSearchController = useRef<AbortController | undefined>(undefined);
   const activeSearchId = useRef(0);
-  const loadingMoreRef = useRef(false);
-  const pendingSeatSearch = useRef<PendingSeatSearch | undefined>(undefined);
-  const lastAppliedFilterSignature = useRef<string | undefined>(undefined);
+  const discoveryInFlight = useRef(false);
+  const activeHydrationController = useRef<AbortController | undefined>(
+    undefined,
+  );
+  const hydrationRunning = useRef(false);
+  const pendingHydration = useRef<PendingHydration | undefined>(undefined);
+  const appliedSearchState = useRef<SearchState | undefined>(undefined);
+  const discoveredScopeKey = useRef<string | undefined>(undefined);
+  const discoveredCandidates = useRef<SearchCandidate[]>([]);
+  const unavailableProviders = useRef<CinemaProvider[]>([]);
+  const hadDiscoveryFailures = useRef(false);
+  const snapshotResults = useRef(new Map<string, SearchResult>());
+  const attemptedSeatIds = useRef(new Set<string>());
+  const failedSeatIds = useRef(new Set<string>());
+  const lastHydrationSignature = useRef<string | undefined>(undefined);
   const latestSearchState = useRef(searchState);
 
   latestSearchState.current = searchState;
@@ -209,11 +231,23 @@ export default function HomePageClient({
     sortBy,
     filters,
   } = searchState;
-  const filterSignature = getFilterSignature(searchState);
+  const resultState = getResultSearchState(searchedState, searchState);
+  const resultViewSignature = getResultViewSignature(resultState);
+  const hydrationSignature = getHydrationSignature(resultState);
   const selectedDateIsToday = date === today && endDate === today;
   const activeFilterCount =
-    Object.values(getEffectiveFilters(searchState, today)).filter(Boolean)
-      .length + experienceTypes.length;
+    Object.values(getEffectiveFilters(resultState, today)).filter(Boolean)
+      .length + resultState.experienceTypes.length;
+  const results = useMemo(
+    () =>
+      filterAndSortSearchResults(
+        loadedResults,
+        resultState,
+        new Date(),
+        today,
+      ),
+    [loadedResults, resultState, today],
+  );
 
   const setUiMode = useCallback((mode: UiMode) => {
     rememberUiModePreference(mode);
@@ -289,22 +323,196 @@ export default function HomePageClient({
     setMovieSuggestionsLoading(false);
   }, []);
 
+  const hydrateEligibleCandidates = useCallback(
+    async (state: SearchState, searchId: number) => {
+      pendingHydration.current = { searchId, state };
+
+      if (hydrationRunning.current) {
+        return;
+      }
+
+      hydrationRunning.current = true;
+
+      try {
+        while (pendingHydration.current) {
+          const request = pendingHydration.current;
+          pendingHydration.current = undefined;
+
+          if (request.searchId !== activeSearchId.current) {
+            continue;
+          }
+
+          const controller = activeHydrationController.current;
+
+          if (!controller || controller.signal.aborted) {
+            continue;
+          }
+
+          const now = new Date();
+          const localToday = getLocalDateInputValue();
+          const eligibleCandidates = discoveredCandidates.current.filter(
+            (candidate) =>
+              matchesCandidateFilters(
+                candidate,
+                request.state,
+                now,
+                localToday,
+              ),
+          );
+          const missingCandidates = eligibleCandidates.filter(
+            (candidate) => !attemptedSeatIds.current.has(candidate.showtime.id),
+          );
+          const previouslyChecked =
+            eligibleCandidates.length - missingCandidates.length;
+
+          setSearchProgress({
+            checked: previouslyChecked,
+            total: eligibleCandidates.length,
+          });
+
+          if (missingCandidates.length === 0) {
+            setWarning(
+              buildSearchWarning(
+                unavailableProviders.current,
+                hadDiscoveryFailures.current,
+                eligibleCandidates.some((candidate) =>
+                  failedSeatIds.current.has(candidate.showtime.id),
+                ),
+              ),
+            );
+            continue;
+          }
+
+          setLoading(true);
+
+          for (
+            let offset = 0;
+            offset < missingCandidates.length;
+            offset += SEAT_HYDRATION_BATCH_SIZE
+          ) {
+            const batch = missingCandidates.slice(
+              offset,
+              offset + SEAT_HYDRATION_BATCH_SIZE,
+            );
+            const loaded = await loadSeatSnapshotBatch(
+              batch,
+              controller.signal,
+            );
+
+            if (
+              controller.signal.aborted ||
+              request.searchId !== activeSearchId.current
+            ) {
+              break;
+            }
+
+            const loadedIds = new Set(
+              loaded.results.map((result) => result.showtime.id),
+            );
+
+            for (const candidate of batch) {
+              if (loadedIds.has(candidate.showtime.id)) {
+                failedSeatIds.current.delete(candidate.showtime.id);
+              } else if (loaded.hadFailures) {
+                failedSeatIds.current.add(candidate.showtime.id);
+              }
+            }
+
+            for (const result of loaded.results) {
+              attemptedSeatIds.current.add(result.showtime.id);
+              snapshotResults.current.set(result.showtime.id, result);
+            }
+
+            setLoadedResults(Array.from(snapshotResults.current.values()));
+            setSearchProgress({
+              checked: Math.min(
+                previouslyChecked + offset + batch.length,
+                eligibleCandidates.length,
+              ),
+              total: eligibleCandidates.length,
+            });
+            setWarning(
+              buildSearchWarning(
+                unavailableProviders.current,
+                hadDiscoveryFailures.current,
+                eligibleCandidates.some((candidate) =>
+                  failedSeatIds.current.has(candidate.showtime.id),
+                ),
+              ),
+            );
+
+            const queuedHydration = pendingHydration.current as
+              | PendingHydration
+              | undefined;
+
+            if (
+              queuedHydration &&
+              getHydrationSignature(queuedHydration.state) !==
+                getHydrationSignature(request.state)
+            ) {
+              break;
+            }
+          }
+        }
+      } finally {
+        hydrationRunning.current = false;
+
+        if (!discoveryInFlight.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [],
+  );
+
   const executeSearch = useCallback(async (state: SearchState) => {
+    const scopeKey = getSearchScopeKey(state);
+
+    if (
+      scopeKey === discoveredScopeKey.current &&
+      unavailableProviders.current.length === 0 &&
+      !hadDiscoveryFailures.current
+    ) {
+      appliedSearchState.current = state;
+      setSearchedState(state);
+      setError(undefined);
+      setHasSearched(true);
+      window.history.replaceState(
+        null,
+        "",
+        `/?${buildSearchParams(state).toString()}`,
+      );
+      lastHydrationSignature.current = getHydrationSignature(state);
+      await hydrateEligibleCandidates(state, activeSearchId.current);
+      return;
+    }
+
     const requestId = activeSearchId.current + 1;
     const controller = new AbortController();
 
     activeSearchId.current = requestId;
     activeSearchController.current?.abort();
+    activeHydrationController.current?.abort();
     activeSearchController.current = controller;
-    pendingSeatSearch.current = undefined;
-    loadingMoreRef.current = false;
-    lastAppliedFilterSignature.current = getFilterSignature(state);
+    activeHydrationController.current = new AbortController();
+    discoveryInFlight.current = true;
+    pendingHydration.current = undefined;
+    appliedSearchState.current = state;
+    setSearchedState(state);
+    discoveredScopeKey.current = undefined;
+    discoveredCandidates.current = [];
+    unavailableProviders.current = [];
+    hadDiscoveryFailures.current = false;
+    snapshotResults.current = new Map();
+    attemptedSeatIds.current = new Set();
+    failedSeatIds.current = new Set();
+    lastHydrationSignature.current = undefined;
     setLoading(true);
-    setLoadingMore(false);
-    setHasMoreResults(false);
+    setHasSearched(false);
+    setSearchProgress({ checked: 0, total: 0 });
     setError(undefined);
     setWarning(undefined);
-    setResults([]);
+    setLoadedResults([]);
 
     const params = buildSearchParams(state);
     window.history.replaceState(null, "", `/?${params.toString()}`);
@@ -312,127 +520,119 @@ export default function HomePageClient({
     try {
       const body = await searchBrowserCinemas(state, controller.signal);
 
-      const seatCandidates = interleaveProviderCandidates(body.results);
-      const page = await loadSeatSnapshotPage(
-        seatCandidates,
-        0,
-        state,
-        controller.signal,
-      );
-
-      if (requestId === activeSearchId.current) {
-        pendingSeatSearch.current = {
-          candidates: seatCandidates,
-          controller,
-          hadSeatFailures: page.hadFailures,
-          offset: page.nextOffset,
-          requestId,
-          state,
-          unavailableProviders: body.unavailableProviders,
-        };
-        setResults(sortSearchResults(page.results, state.sortBy));
-        setHasMoreResults(page.nextOffset < seatCandidates.length);
-        setWarning(
-          buildSearchWarning(
-            body.unavailableProviders,
-            page.hadFailures,
-          ),
-        );
+      if (controller.signal.aborted || requestId !== activeSearchId.current) {
+        return;
       }
+
+      discoveredCandidates.current = interleaveProviderCandidates(body.results);
+      discoveredScopeKey.current = scopeKey;
+      unavailableProviders.current = body.unavailableProviders;
+      hadDiscoveryFailures.current = body.partialResults;
+      setWarning(
+        buildSearchWarning(
+          body.unavailableProviders,
+          body.partialResults,
+          false,
+        ),
+      );
+      setHasSearched(true);
+
+      const hydrationState = getResultSearchState(
+        state,
+        latestSearchState.current,
+      );
+      lastHydrationSignature.current = getHydrationSignature(hydrationState);
+      discoveryInFlight.current = false;
+      await hydrateEligibleCandidates(hydrationState, requestId);
     } catch {
       if (!controller.signal.aborted && requestId === activeSearchId.current) {
-        setResults([]);
+        setLoadedResults([]);
         setError(
           "Search is temporarily unavailable. Check your connection and try again.",
         );
       }
     } finally {
       if (requestId === activeSearchId.current) {
+        discoveryInFlight.current = false;
+      }
+
+      if (
+        requestId === activeSearchId.current &&
+        discoveredCandidates.current.length === 0
+      ) {
         setLoading(false);
         setHasSearched(true);
       }
     }
-  }, []);
-
-  const loadMoreResults = useCallback(async () => {
-    const pending = pendingSeatSearch.current;
-
-    if (
-      !pending ||
-      loadingMoreRef.current ||
-      pending.offset >= pending.candidates.length ||
-      pending.controller.signal.aborted
-    ) {
-      return;
-    }
-
-    loadingMoreRef.current = true;
-    setLoadingMore(true);
-
-    try {
-      const page = await loadSeatSnapshotPage(
-        pending.candidates,
-        pending.offset,
-        pending.state,
-        pending.controller.signal,
-      );
-
-      if (pending.requestId !== activeSearchId.current) {
-        return;
-      }
-
-      pending.offset = page.nextOffset;
-      pending.hadSeatFailures ||= page.hadFailures;
-      setResults((current) =>
-        sortSearchResults([...current, ...page.results], pending.state.sortBy),
-      );
-      setHasMoreResults(pending.offset < pending.candidates.length);
-      setWarning(
-        buildSearchWarning(
-          pending.unavailableProviders,
-          pending.hadSeatFailures,
-        ),
-      );
-    } catch (error) {
-      if (
-        pending.requestId === activeSearchId.current &&
-        !(error instanceof DOMException && error.name === "AbortError")
-      ) {
-        pending.hadSeatFailures = true;
-        setWarning(
-          buildSearchWarning(pending.unavailableProviders, true),
-        );
-      }
-    } finally {
-      if (pending.requestId === activeSearchId.current) {
-        loadingMoreRef.current = false;
-        setLoadingMore(false);
-      }
-    }
-  }, []);
+  }, [hydrateEligibleCandidates]);
 
   const onMovieSuggestionsClose = useCallback(() => {
     setMovieSuggestionsOpen(false);
   }, []);
 
   useEffect(() => {
-    return () => activeSearchController.current?.abort();
+    return () => {
+      activeSearchController.current?.abort();
+      activeHydrationController.current?.abort();
+    };
   }, []);
 
   useEffect(() => {
-    if (
-      !hasSearched ||
-      filterSignature === lastAppliedFilterSignature.current
-    ) {
+    if (!hasSearched || !appliedSearchState.current) {
       return;
     }
 
+    const current = getResultSearchState(
+      appliedSearchState.current,
+      latestSearchState.current,
+    );
+    const params = buildSearchParams({
+      ...appliedSearchState.current,
+      experienceTypes: current.experienceTypes,
+      filters: current.filters,
+      movieTitle: current.movieTitle,
+      sortBy: current.sortBy,
+    });
+    window.history.replaceState(null, "", `/?${params.toString()}`);
+
+    if (lastHydrationSignature.current === hydrationSignature) {
+      return;
+    }
+
+    const scheduledSearchId = activeSearchId.current;
+    const scheduledHydrationSignature = hydrationSignature;
     const timeout = window.setTimeout(() => {
-      void executeSearch(latestSearchState.current);
+      if (
+        scheduledSearchId !== activeSearchId.current ||
+        scheduledHydrationSignature !==
+          getHydrationSignature(
+            getResultSearchState(
+              appliedSearchState.current,
+              latestSearchState.current,
+            ),
+          ) ||
+        lastHydrationSignature.current === scheduledHydrationSignature
+      ) {
+        return;
+      }
+
+      lastHydrationSignature.current = scheduledHydrationSignature;
+      void hydrateEligibleCandidates(
+        getResultSearchState(
+          appliedSearchState.current,
+          latestSearchState.current,
+        ),
+        activeSearchId.current,
+      );
     }, 200);
 
     return () => window.clearTimeout(timeout);
-  }, [executeSearch, filterSignature, hasSearched]);
+  }, [
+    hasSearched,
+    hydrateEligibleCandidates,
+    hydrationSignature,
+    resultViewSignature,
+  ]);
 
   useEffect(() => {
     try {
@@ -600,12 +800,11 @@ export default function HomePageClient({
     activeFilterCount,
     error,
     form,
-    hasMoreResults,
     hasSearched,
-    loadingMore,
     onDismissThemePrompt: dismissThemePrompt,
-    onLoadMoreResults: loadMoreResults,
+    resultState,
     results,
+    searchProgress,
     setUiMode,
     showThemePrompt,
     uiMode,
@@ -623,24 +822,17 @@ function rememberUiModePreference(mode: UiMode) {
   document.cookie = `${UI_MODE_COOKIE_NAME}=${mode}; Path=/; Max-Age=${UI_MODE_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
 }
 
-async function loadSeatSnapshotPage(
+async function loadSeatSnapshotBatch(
   candidates: SearchCandidate[],
-  offset: number,
-  state: SearchState,
   signal: AbortSignal,
 ): Promise<{
   hadFailures: boolean;
-  nextOffset: number;
   results: SearchResult[];
 }> {
-  const batch = candidates.slice(
-    offset,
-    offset + SEAT_RESULT_BATCH_SIZE,
-  );
-  const cineplexCandidates = batch.filter(
+  const cineplexCandidates = candidates.filter(
     (candidate) => candidate.theatre.provider === "cineplex",
   );
-  const landmarkCandidates = batch.filter(
+  const landmarkCandidates = candidates.filter(
     (candidate) => candidate.theatre.provider === "landmark",
   );
   const [cineplex, landmark] = await Promise.all([
@@ -653,16 +845,12 @@ async function loadSeatSnapshotPage(
       result,
     ]),
   );
-  const results = batch
+  const results = candidates
     .map((candidate) => resultsById.get(candidate.showtime.id))
-    .filter(
-      (result): result is SearchResult =>
-        Boolean(result) && matchesSeatFilters(result as SearchResult, state.filters),
-    );
+    .filter((result): result is SearchResult => Boolean(result));
 
   return {
     hadFailures: cineplex.hadFailures || landmark.hadFailures,
-    nextOffset: offset + batch.length,
     results,
   };
 }
@@ -764,12 +952,17 @@ async function loadLandmarkSeatSnapshots(
 
 function buildSearchWarning(
   unavailableProviders: CinemaProvider[],
+  hadDiscoveryFailures: boolean,
   hadSeatFailures: boolean,
 ): string | undefined {
   const messages = unavailableProviders.map(
     (provider) =>
       `${cinemaProviderLabel(provider)} results are temporarily unavailable.`,
   );
+
+  if (hadDiscoveryFailures) {
+    messages.push("Some showtimes couldn't be loaded.");
+  }
 
   if (hadSeatFailures) {
     messages.push("Some seat counts couldn't be loaded.");
@@ -809,75 +1002,22 @@ function interleaveProviderCandidates(
   return interleaved;
 }
 
-function sortSearchResults(
-  results: SearchResult[],
-  sortBy: SortOption,
-): SearchResult[] {
-  const direction = sortBy.endsWith("desc") ? -1 : 1;
-
-  return [...results].sort((a, b) => {
-    const distance = compareOptionalDistance(
-      a.distanceKm,
-      b.distanceKm,
-      sortBy.startsWith("distance") ? direction : 1,
-    );
-    const time =
-      (new Date(a.showtime.startsAt).getTime() -
-        new Date(b.showtime.startsAt).getTime()) *
-      (sortBy.startsWith("time") ? direction : 1);
-
-    return sortBy.startsWith("distance") ? distance || time : time || distance;
-  });
-}
-
-function compareOptionalDistance(
-  a: number | undefined,
-  b: number | undefined,
-  direction: number,
-): number {
-  if (a === undefined && b === undefined) {
-    return 0;
-  }
-
-  if (a === undefined) {
-    return 1;
-  }
-
-  if (b === undefined) {
-    return -1;
-  }
-
-  return (a - b) * direction;
-}
-
-function matchesSeatFilters(
-  result: SearchResult,
-  filters: SearchFilters,
-): boolean {
-  return (
-    (!filters.onlyZeroSold || result.snapshot.occupiedEstimate === 0) &&
-    (!filters.maxFiveSold || result.snapshot.occupiedEstimate <= 5) &&
-    (!filters.accessibleAvailable || result.snapshot.accessibilityCount > 0)
-  );
-}
-
 function CleanHomeView(props: SearchViewProps) {
   const {
     activeFilterCount,
     error,
     form,
-    hasMoreResults,
     hasSearched,
-    loadingMore,
-    onLoadMoreResults,
+    resultState,
     results,
+    searchProgress,
     setUiMode,
     showThemePrompt,
     uiMode,
     onDismissThemePrompt,
     warning,
   } = props;
-  const { date, endDate, loading, location, sortBy } = form;
+  const { loading } = form;
   return (
     <main className="flex min-h-screen flex-col bg-[#050505] px-4 py-5 text-neutral-100 sm:px-6 lg:px-8">
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-5">
@@ -909,19 +1049,22 @@ function CleanHomeView(props: SearchViewProps) {
                 <div>
                   <p className="text-sm text-neutral-400">Results</p>
                   <p className="mt-1 text-3xl font-semibold text-white">
-                    {resultCount(results, loading, hasMoreResults)}
+                    {resultCount(results, loading)}
                   </p>
                 </div>
                 <div className="text-right text-sm text-neutral-400">
                   <p>
-                    {location.trim() || "No location"} -{" "}
-                    {formatDateRangeLabel(date, endDate)}
+                    {resultState.location.trim() || "No location"} -{" "}
+                    {formatDateRangeLabel(
+                      resultState.date,
+                      resultState.endDate,
+                    )}
                   </p>
                   <p>
                     {activeFilterCount} active filter
                     {activeFilterCount === 1 ? "" : "s"}
                   </p>
-                  <p>{sortLabel(sortBy)}</p>
+                  <p>{sortLabel(resultState.sortBy)}</p>
                 </div>
               </div>
             </div>
@@ -944,12 +1087,13 @@ function CleanHomeView(props: SearchViewProps) {
               </div>
             ) : null}
 
-            {loading ? <CleanSearchLoader /> : null}
+            {loading ? (
+              <CleanSearchLoader progress={searchProgress} />
+            ) : null}
 
             {!loading &&
             hasSearched &&
             !error &&
-            !hasMoreResults &&
             results.length === 0 ? (
               <div
                 className="rounded-lg border border-neutral-800 bg-[#111111] p-5 text-sm leading-6 text-neutral-300"
@@ -962,13 +1106,6 @@ function CleanHomeView(props: SearchViewProps) {
             ) : null}
 
             <CleanResultList results={results} />
-            {hasMoreResults ? (
-              <LoadMoreShowtimesButton
-                loading={loadingMore}
-                mode="clean"
-                onClick={onLoadMoreResults}
-              />
-            ) : null}
           </section>
         </div>
       </div>
@@ -985,18 +1122,17 @@ function FunHomeView(props: SearchViewProps) {
     activeFilterCount,
     error,
     form,
-    hasMoreResults,
     hasSearched,
-    loadingMore,
-    onLoadMoreResults,
+    resultState,
     results,
+    searchProgress,
     setUiMode,
     showThemePrompt,
     uiMode,
     onDismissThemePrompt,
     warning,
   } = props;
-  const { date, endDate, loading, location, radiusKm, sortBy } = form;
+  const { loading } = form;
   return (
     <main className="chaos-stage min-h-screen overflow-hidden px-3 py-4 text-black sm:px-5 lg:px-8">
       <div className="relative z-10 mx-auto flex w-full max-w-[1500px] flex-col gap-5">
@@ -1045,7 +1181,10 @@ function FunHomeView(props: SearchViewProps) {
               <HeaderStat
                 icon={<CalendarDays className="h-5 w-5" aria-hidden="true" />}
                 label="Date"
-                value={formatDateRangeLabel(date, endDate)}
+                value={formatDateRangeLabel(
+                  resultState.date,
+                  resultState.endDate,
+                )}
                 accent="bg-[#00d5ff]"
               />
             </div>
@@ -1081,24 +1220,27 @@ function FunHomeView(props: SearchViewProps) {
                   <p
                     className={`mt-1 font-black leading-none ${loading ? "text-[clamp(2.5rem,4.5vw,4rem)]" : "text-[clamp(4rem,10vw,7rem)]"}`}
                   >
-                    {resultCount(results, loading, hasMoreResults)}
+                    {resultCount(results, loading)}
                   </p>
                 </div>
                 <div className="grid gap-4 p-5 lg:pr-12">
                   <div className="flex flex-wrap gap-3">
                     <QueryChip
                       icon={<MapPin className="h-4 w-4" aria-hidden="true" />}
-                      label={location.trim() || "No location"}
+                      label={resultState.location.trim() || "No location"}
                     />
                     <QueryChip
                       icon={
                         <CalendarDays className="h-4 w-4" aria-hidden="true" />
                       }
-                      label={formatDateRangeLabel(date, endDate)}
+                      label={formatDateRangeLabel(
+                        resultState.date,
+                        resultState.endDate,
+                      )}
                     />
                     <QueryChip
                       icon={<Radar className="h-4 w-4" aria-hidden="true" />}
-                      label={`${radiusKm} km`}
+                      label={`${resultState.radiusKm} km`}
                     />
                     <QueryChip
                       icon={<Filter className="h-4 w-4" aria-hidden="true" />}
@@ -1108,7 +1250,7 @@ function FunHomeView(props: SearchViewProps) {
                       icon={
                         <ArrowDownUp className="h-4 w-4" aria-hidden="true" />
                       }
-                      label={sortLabel(sortBy)}
+                      label={sortLabel(resultState.sortBy)}
                     />
                   </div>
                 </div>
@@ -1133,12 +1275,11 @@ function FunHomeView(props: SearchViewProps) {
               </div>
             ) : null}
 
-            {loading ? <FunSearchLoader /> : null}
+            {loading ? <FunSearchLoader progress={searchProgress} /> : null}
 
             {!loading &&
             hasSearched &&
             !error &&
-            !hasMoreResults &&
             results.length === 0 ? (
               <div
                 className="border-[6px] border-black bg-white p-5 text-sm font-black uppercase leading-6 shadow-[10px_10px_0_#111111] sm:rotate-1"
@@ -1152,9 +1293,6 @@ function FunHomeView(props: SearchViewProps) {
 
             <FunResultList
               key={results[0]?.snapshot.checkedAt ?? "no-results"}
-              hasMoreResults={hasMoreResults}
-              loadingMore={loadingMore}
-              onLoadMoreResults={onLoadMoreResults}
               results={results}
             />
           </section>
@@ -1382,7 +1520,7 @@ function SearchButton({ loading, mode }: { loading: boolean; mode: UiMode }) {
   );
 }
 
-function CleanSearchLoader() {
+function CleanSearchLoader({ progress }: { progress: SearchProgress }) {
   return (
     <div
       className="rounded-lg border border-neutral-800 bg-[#111111] p-5 shadow-[0_14px_44px_rgba(0,0,0,0.28)]"
@@ -1396,10 +1534,10 @@ function CleanSearchLoader() {
         />
         <div>
           <p className="text-sm font-semibold text-white">
-            Searching showtimes
+            {searchProgressTitle(progress)}
           </p>
           <p className="mt-1 text-sm text-neutral-400">
-            Checking nearby theatres and seat maps.
+            {searchProgressDescription(progress)}
           </p>
         </div>
       </div>
@@ -1407,7 +1545,7 @@ function CleanSearchLoader() {
   );
 }
 
-function FunSearchLoader() {
+function FunSearchLoader({ progress }: { progress: SearchProgress }) {
   return (
     <div
       className="fun-throbber-panel border-[6px] border-black p-5 text-black shadow-[12px_12px_0_#111111] sm:-rotate-1 sm:p-7"
@@ -1421,10 +1559,10 @@ function FunSearchLoader() {
         />
         <div className="w-full max-w-5xl">
           <p className="inline-flex -rotate-2 border-4 border-black bg-[#00e676] px-5 py-2 text-[0.8rem] font-black uppercase tracking-[0.14em] shadow-[5px_5px_0_#111111]">
-            Searching
+            {searchProgressTitle(progress)}
           </p>
           <p className="mt-4 text-[clamp(1.6rem,4vw,3.2rem)] font-black uppercase leading-none">
-            Counting seats across nearby theatres
+            {searchProgressDescription(progress)}
           </p>
         </div>
       </div>
@@ -1957,6 +2095,18 @@ function CleanResultCard({ result }: { result: SearchResult }) {
             {result.snapshot.occupiedEstimate} occupied /{" "}
             {result.snapshot.sellableSeats} seats
           </p>
+          {result.theatre.provider === "landmark" ? (
+            <>
+              <p className="text-neutral-300">
+                {result.snapshot.occupiedAccessibleSeats} occupied /{" "}
+                {result.snapshot.accessibleSeats} accessible seats
+              </p>
+              <p className="text-neutral-300">
+                {result.snapshot.occupiedCompanionSeats} occupied /{" "}
+                {result.snapshot.companionSeats} companion seats
+              </p>
+            </>
+          ) : null}
           <p className="text-neutral-400">
             Last checked {relativeMinutes(checkedAt)} min ago
           </p>
@@ -2175,6 +2325,18 @@ function FunResultCard({ result }: { result: SearchResult }) {
 
         <aside className="grid border-t-[6px] border-black bg-black text-white lg:border-l-[6px] lg:border-t-0">
           <div className="grid gap-2 p-4 text-sm font-bold uppercase text-zinc-100">
+            {result.theatre.provider === "landmark" ? (
+              <>
+                <p>
+                  {result.snapshot.occupiedAccessibleSeats} occupied /{" "}
+                  {result.snapshot.accessibleSeats} accessible seats
+                </p>
+                <p>
+                  {result.snapshot.occupiedCompanionSeats} occupied /{" "}
+                  {result.snapshot.companionSeats} companion seats
+                </p>
+              </>
+            ) : null}
             <p>Last checked {relativeMinutes(checkedAt)} min ago</p>
           </div>
         </aside>
@@ -2184,14 +2346,8 @@ function FunResultCard({ result }: { result: SearchResult }) {
 }
 
 const FunResultList = memo(function FunResultList({
-  hasMoreResults,
-  loadingMore,
-  onLoadMoreResults,
   results,
 }: {
-  hasMoreResults: boolean;
-  loadingMore: boolean;
-  onLoadMoreResults: () => void;
   results: SearchResult[];
 }) {
   const [visibleCount, setVisibleCount] = useState(FUN_RESULT_BATCH_SIZE);
@@ -2217,42 +2373,10 @@ const FunResultList = memo(function FunResultList({
         >
           Show {Math.min(FUN_RESULT_BATCH_SIZE, remainingCount)} more results
         </button>
-      ) : hasMoreResults ? (
-        <LoadMoreShowtimesButton
-          loading={loadingMore}
-          mode="fun"
-          onClick={onLoadMoreResults}
-        />
       ) : null}
     </>
   );
 });
-
-function LoadMoreShowtimesButton({
-  loading,
-  mode,
-  onClick,
-}: {
-  loading: boolean;
-  mode: UiMode;
-  onClick: () => void;
-}) {
-  const className =
-    mode === "fun"
-      ? "focus-ring mx-auto inline-flex min-h-14 items-center justify-center border-[6px] border-black bg-[#f7e900] px-6 text-base font-black uppercase text-black shadow-[8px_8px_0_#111111] transition hover:bg-[#00e676] disabled:cursor-wait disabled:bg-zinc-300"
-      : "focus-ring mx-auto inline-flex min-h-11 items-center justify-center rounded-md border border-amber-300 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-300 hover:text-black disabled:cursor-wait disabled:border-neutral-700 disabled:text-neutral-500";
-
-  return (
-    <button
-      className={className}
-      type="button"
-      disabled={loading}
-      onClick={onClick}
-    >
-      {loading ? "Checking more showtimes" : "Check more showtimes"}
-    </button>
-  );
-}
 
 function MetricSlab({
   label,
@@ -2302,13 +2426,24 @@ function sortLabel(sortBy: SortOption): string {
 function resultCount(
   results: SearchResult[],
   loading: boolean,
-  hasMoreResults: boolean,
 ): string {
   if (loading) {
     return "Searching";
   }
 
-  return `${results.length}${hasMoreResults ? "+" : ""}`;
+  return String(results.length);
+}
+
+function searchProgressTitle(progress: SearchProgress): string {
+  return progress.total > 0
+    ? `Checking ${progress.checked} of ${progress.total} showtimes`
+    : "Finding showtimes";
+}
+
+function searchProgressDescription(progress: SearchProgress): string {
+  return progress.total > 0
+    ? "Results appear as their seat maps are checked."
+    : "Checking nearby theatres before counting seats.";
 }
 
 function relativeMinutes(date: Date): number {
@@ -2325,10 +2460,41 @@ function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
     : action;
 }
 
-function getFilterSignature(state: SearchState): string {
+function getResultSearchState(
+  scope: SearchState | undefined,
+  current: SearchState,
+): SearchState {
+  if (!scope) {
+    return current;
+  }
+
+  if (getSearchScopeKey(scope) !== getSearchScopeKey(current)) {
+    return scope;
+  }
+
+  return {
+    ...scope,
+    experienceTypes: current.experienceTypes,
+    filters: current.filters,
+    movieTitle: current.movieTitle,
+    sortBy: current.sortBy,
+  };
+}
+
+function getResultViewSignature(state: SearchState): string {
   return JSON.stringify({
     experienceTypes: [...state.experienceTypes].sort(),
     filters: state.filters,
+    movieTitle: state.movieTitle.trim().toLowerCase(),
     sortBy: state.sortBy,
+  });
+}
+
+function getHydrationSignature(state: SearchState): string {
+  return JSON.stringify({
+    experienceTypes: [...state.experienceTypes].sort(),
+    movieTitle: state.movieTitle.trim().toLowerCase(),
+    nonVipOnly: state.filters.nonVipOnly,
+    startsInNextTwoHours: state.filters.startsInNextTwoHours,
   });
 }

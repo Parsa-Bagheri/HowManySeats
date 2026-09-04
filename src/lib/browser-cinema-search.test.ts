@@ -6,7 +6,7 @@ import {
   suggestBrowserMovieTitles,
 } from "./browser-cinema-search";
 import type { SearchState } from "./search-state";
-import type { SearchCandidate } from "./types";
+import type { SearchCandidate, SearchQuery } from "./types";
 
 const state: SearchState = {
   date: "2026-09-05",
@@ -48,6 +48,7 @@ test("combines uncapped browser Landmark and server Cineplex results", async (t)
 
     if (url.startsWith("/api/search?")) {
       return Response.json({
+        partialResults: true,
         results: cineplexResults,
         unavailableProviders: [],
       });
@@ -69,6 +70,7 @@ test("combines uncapped browser Landmark and server Cineplex results", async (t)
     41,
   );
   assert.deepEqual(result.unavailableProviders, []);
+  assert.equal(result.partialResults, true);
 
   globalThis.fetch = async (input) => {
     if (String(input).startsWith("/api/search?")) {
@@ -88,6 +90,61 @@ test("combines uncapped browser Landmark and server Cineplex results", async (t)
   assert.deepEqual(partialResult.unavailableProviders, ["cineplex"]);
 });
 
+test("discovers an unfiltered showtime superset for local filtering", async (t) => {
+  const originalFetch = globalThis.fetch;
+  let cineplexUrl = "";
+  let landmarkQuery: SearchQuery | undefined;
+  const filteredState: SearchState = {
+    ...state,
+    experienceTypes: ["IMAX"],
+    filters: {
+      accessibleAvailable: true,
+      maxFiveSold: true,
+      nonVipOnly: true,
+      onlyZeroSold: true,
+      startsInNextTwoHours: true,
+    },
+    movieTitle: "Example",
+    sortBy: "time-desc",
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    cineplexUrl = String(input);
+    return Response.json({
+      partialResults: false,
+      results: [],
+      unavailableProviders: [],
+    });
+  };
+
+  await searchBrowserCinemas(
+    filteredState,
+    new AbortController().signal,
+    {
+      search: async (query) => {
+        landmarkQuery = query;
+        return [];
+      },
+      suggestMovieTitles: async () => [],
+    },
+  );
+
+  const params = new URL(cineplexUrl, "https://example.com").searchParams;
+  assert.equal(params.get("location"), "Waterloo");
+  assert.equal(params.get("movieTitle"), null);
+  assert.equal(params.get("experienceTypes"), null);
+  assert.equal(params.get("accessibleAvailable"), null);
+  assert.equal(params.get("nonVipOnly"), null);
+  assert.equal(params.get("sortBy"), null);
+  assert.equal(landmarkQuery?.movieTitle, "");
+  assert.deepEqual(landmarkQuery?.experienceTypes, []);
+  assert.equal(landmarkQuery?.accessibleAvailable, false);
+  assert.equal(landmarkQuery?.nonVipOnly, false);
+});
+
 test("keeps Cineplex results when Landmark discovery fails", async (t) => {
   const originalFetch = globalThis.fetch;
 
@@ -97,6 +154,7 @@ test("keeps Cineplex results when Landmark discovery fails", async (t) => {
   globalThis.fetch = async (input) => {
     if (String(input).startsWith("/api/search?")) {
       return Response.json({
+        partialResults: false,
         results: [cineplexCandidate(1)],
         unavailableProviders: [],
       });
@@ -150,6 +208,7 @@ test("does not return partial results after a search is aborted", async (t) => {
   });
   globalThis.fetch = async () =>
     Response.json({
+      partialResults: false,
       results: [cineplexCandidate(1)],
       unavailableProviders: [],
     });
