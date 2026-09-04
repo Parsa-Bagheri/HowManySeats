@@ -24,7 +24,8 @@ import type {
 const THEATRICAL_API_BASE = "https://apis.cineplex.com/prod/cpx/theatrical/api";
 const TICKETING_API_BASE = "https://apis.cineplex.com/prod/ticketing/api";
 const PUBLIC_SITE_KEY = "dcdac5601d864addbc2675a2e96cb1f8";
-const SEAT_CHECK_CONCURRENCY = 4;
+const REQUEST_TIMEOUT_MS = 8_000;
+const SEAT_CHECK_CONCURRENCY = 8;
 const MAX_SUGGESTION_THEATRES = 8;
 
 type CineplexTheatresResponse = {
@@ -430,30 +431,38 @@ export class CineplexClient {
   }
 
   private async getJson<T>(url: string, emptyFallback?: T): Promise<T> {
-    const response = await fetch(url, {
-      headers: this.headers,
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new Error(
-        `Cineplex GET failed ${response.status} for ${url}: ${body.slice(0, 300)}`,
-      );
-    }
-
-    const text = await response.text();
-
-    if (!text.trim() && emptyFallback !== undefined) {
-      return emptyFallback;
-    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new Error(
-        `Cineplex returned invalid JSON for ${url}: ${text.slice(0, 300)}`,
-      );
+      const response = await fetch(url, {
+        headers: this.headers,
+        cache: "no-store",
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        throw new Error(
+          `Cineplex GET failed ${response.status} for ${url}: ${body.slice(0, 300)}`,
+        );
+      }
+
+      const text = await response.text();
+
+      if (!text.trim() && emptyFallback !== undefined) {
+        return emptyFallback;
+      }
+
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        throw new Error(
+          `Cineplex returned invalid JSON for ${url}: ${text.slice(0, 300)}`,
+        );
+      }
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

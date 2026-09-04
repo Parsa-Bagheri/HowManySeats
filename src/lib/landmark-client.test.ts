@@ -660,6 +660,42 @@ test("fails clearly when the official movie API is blocked", async (t) => {
   assert.deepEqual(requests, [`${apiOrigin}/movies/22/181`]);
 });
 
+test("aborts an in-flight Landmark movie request", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let requestSignal: AbortSignal | undefined;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (_input, init) => {
+    requestSignal = init?.signal ?? undefined;
+
+    return new Promise<Response>((_resolve, reject) => {
+      requestSignal?.addEventListener(
+        "abort",
+        () => reject(requestSignal?.reason),
+        { once: true },
+      );
+    });
+  };
+
+  const showtimes = new LandmarkClient(
+    "https://abort-movie-api.landmark.test",
+    undefined,
+    controller.signal,
+  ).getShowtimes(waterloo, "2026-09-01");
+
+  controller.abort();
+
+  await assert.rejects(
+    showtimes,
+    (error: unknown) =>
+      error instanceof DOMException && error.name === "AbortError",
+  );
+  assert.equal(requestSignal?.aborted, true);
+});
+
 test("converts Landmark local showtimes with daylight-saving offsets", () => {
   assert.equal(
     localDateTimeToIso("2026-09-01", "7:30 PM", "America/Toronto"),

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CinemaSearch } from "@/lib/cinema-search";
+import { CineplexClient } from "@/lib/cineplex-client";
 import { parseShowtimeExperienceTypes } from "@/lib/experience-types";
 import {
   searchAreaSchema,
@@ -9,7 +10,7 @@ import {
 } from "@/lib/search-request";
 
 export const maxDuration = 60;
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 const booleanParam = z
   .enum(["true", "false"])
@@ -59,7 +60,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const search = await new CinemaSearch().search({
+    const search = await new CinemaSearch([
+      { client: new CineplexClient(), provider: "cineplex" },
+    ]).search({
       ...parsed.data,
       endDate: parsed.data.endDate ?? parsed.data.date,
     });

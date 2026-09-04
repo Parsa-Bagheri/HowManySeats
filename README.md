@@ -42,18 +42,17 @@ GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-layout
 GET /prod/ticketing/api/v1/theatre/{theatreId}/showtime/{showtimeId}/seat-availability?preview=true
 ```
 
-The Landmark client gets the complete movie and session payload from Landmark's
-public movie API. After the server returns matching showtimes, the visitor's
-browser gets seat availability from Landmark's public booking API:
+The visitor's browser gets Landmark showtimes and seat availability directly
+from Landmark's public JSON APIs:
 
 ```text
 GET https://movieapi.landmarkcinemas.com/movies/22/{cinemaId}
 GET https://bookingapi.landmarkcinemas.com/api/Seating/GetSessionSeatData/{cinemaId}/{sessionId}
 ```
 
-The client keeps movie payloads in a bounded 60-second cache. Seat-map requests
-go directly from the visitor to the first-party JSON API. The app doesn't launch
-an automated browser or use an HTML reader.
+The client keeps movie payloads in a bounded 60-second cache. Both requests go
+directly from the visitor to first-party JSON APIs. The app doesn't launch an
+automated browser or use an HTML reader.
 
 Landmark provides its seat preview inside the official booking page instead of
 at a standalone URL. Both Landmark actions open that official page. Select
@@ -96,8 +95,6 @@ Open [http://localhost:3000](http://localhost:3000).
 | --- | --- |
 | `CINEPLEX_APIM_SUBSCRIPTION_KEY` | Optional override for the public Cineplex site API key used by the server |
 | `CINEPLEX_MAX_THEATRES_PER_SEARCH` | Maximum nearby theaters inspected per search; defaults to `5` |
-| `LANDMARK_MOVIE_CACHE_SECONDS` | Maximum age for cached Landmark movie payloads; defaults to `60` and is capped at `300` |
-| `LANDMARK_MAX_THEATRES_PER_SEARCH` | Maximum nearby Landmark theaters inspected per search; defaults to `5` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Optional browser-restricted key for Google Maps address suggestions |
 
 For Google address suggestions, enable the Maps JavaScript API and Places API

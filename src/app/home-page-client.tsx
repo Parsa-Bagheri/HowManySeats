@@ -29,6 +29,10 @@ import {
 } from "react";
 import AddressField, { type LocationCoordinates } from "@/app/address-field";
 import {
+  searchBrowserCinemas,
+  suggestBrowserMovieTitles,
+} from "@/lib/browser-cinema-search";
+import {
   addDays,
   formatDateRangeLabel,
   normalizeEndDate,
@@ -306,27 +310,7 @@ export default function HomePageClient({
     window.history.replaceState(null, "", `/?${params.toString()}`);
 
     try {
-      const response = await fetch(`/api/search?${params.toString()}`, {
-        signal: controller.signal,
-      });
-      const body = (await response.json()) as
-        | {
-            results: SearchCandidate[];
-            unavailableProviders: CinemaProvider[];
-          }
-        | { error: string };
-
-      if (!response.ok || !("results" in body)) {
-        if (requestId === activeSearchId.current) {
-          setResults([]);
-          setError(
-            "error" in body
-              ? body.error
-              : "Search is temporarily unavailable. Try again.",
-          );
-        }
-        return;
-      }
+      const body = await searchBrowserCinemas(state, controller.signal);
 
       const seatCandidates = interleaveProviderCandidates(body.results);
       const page = await loadSeatSnapshotPage(
@@ -509,30 +493,15 @@ export default function HomePageClient({
       setMovieSuggestionsLoading(true);
 
       try {
-        const params = new URLSearchParams({
-          location,
-          date,
-          endDate,
-          radiusKm,
+        const suggestions = await suggestBrowserMovieTitles(
+          latestSearchState.current,
           query,
-          limit: "8",
-        });
-
-        if (latitude !== undefined && longitude !== undefined) {
-          params.set("latitude", String(latitude));
-          params.set("longitude", String(longitude));
-        }
-        const response = await fetch(
-          `/api/movie-suggestions?${params.toString()}`,
-          {
-            signal: controller.signal,
-          },
+          controller.signal,
         );
-        const body = (await response.json()) as
-          | { suggestions: MovieSuggestion[] }
-          | { error: string };
-        const suggestions =
-          response.ok && "suggestions" in body ? body.suggestions : [];
+
+        if (controller.signal.aborted) {
+          return;
+        }
 
         setMovieSuggestions(suggestions);
         setMovieSuggestionsOpen(

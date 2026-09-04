@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CinemaSearch } from "@/lib/cinema-search";
+import { CineplexClient } from "@/lib/cineplex-client";
 import {
   searchAreaSchema,
   searchParamsToRecord,
@@ -8,7 +9,7 @@ import {
 } from "@/lib/search-request";
 
 export const maxDuration = 60;
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 const suggestionSchema = searchAreaSchema.extend({
   query: z.string().min(2).max(120),
@@ -44,7 +45,9 @@ export async function GET(request: Request) {
   }
 
   try {
-    const suggestions = await new CinemaSearch().suggestMovieTitles({
+    const suggestions = await new CinemaSearch([
+      { client: new CineplexClient(), provider: "cineplex" },
+    ]).suggestMovieTitles({
       location: parsed.data.location,
       date: parsed.data.date,
       endDate: parsed.data.endDate ?? parsed.data.date,

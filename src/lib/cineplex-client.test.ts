@@ -238,7 +238,7 @@ test("checks seat maps in bounded parallel batches", async (t) => {
   assert.equal(snapshots.results.length, 5);
   assert.deepEqual(snapshots.failedResultIds, []);
   assert.equal(suggestions[0]?.showtimeCount, 5);
-  assert.equal(peakSeatRequests, 8);
+  assert.equal(peakSeatRequests, 10);
 });
 
 test("does not truncate showtime candidates at 40", async (t) => {

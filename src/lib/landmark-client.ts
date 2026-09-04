@@ -26,8 +26,8 @@ const LANDMARK_PUBLIC_ORIGIN = "https://www.landmarkcinemas.com";
 const LANDMARK_MOVIE_API_ORIGIN = "https://movieapi.landmarkcinemas.com";
 const LANDMARK_CIRCUIT_ID = "22";
 const DEFAULT_MOVIE_CACHE_SECONDS = 60;
-const MAX_MOVIE_CACHE_SECONDS = 300;
 const MAX_MOVIE_CACHE_ENTRIES = 16;
+const MAX_THEATRES_PER_SEARCH = 5;
 const MAX_SUGGESTION_THEATRES = 8;
 const SOURCE_TIMEOUT_MS = 15_000;
 
@@ -62,7 +62,7 @@ export type LandmarkMovie = {
 
 type CachedLandmarkMovies = {
   expiresAt: number;
-  value: Promise<LandmarkMovie[]>;
+  value: LandmarkMovie[];
 };
 
 const sharedMovieCache = new Map<string, CachedLandmarkMovies>();
@@ -74,15 +74,22 @@ type ShowtimeCandidate = {
 };
 
 export class LandmarkClient {
+  private readonly requestMovieCache = new Map<
+    string,
+    Promise<LandmarkMovie[]>
+  >();
   private readonly movieApiOrigin: string;
   private readonly now: () => Date;
+  private readonly signal?: AbortSignal;
 
   constructor(
     movieApiOrigin = LANDMARK_MOVIE_API_ORIGIN,
     now: () => Date = () => new Date(),
+    signal?: AbortSignal,
   ) {
     this.movieApiOrigin = movieApiOrigin.replace(/\/$/, "");
     this.now = now;
+    this.signal = signal;
   }
 
   async search(query: SearchQuery): Promise<SearchCandidate[]> {
@@ -93,14 +100,9 @@ export class LandmarkClient {
     const searchStartedAt = this.now();
     const { origin, theatres } = await this.resolveSearchArea(query);
     const searchDates = getValidatedSearchDates(query);
-    const maxTheatres = readPositiveInteger(
-      process.env.LANDMARK_MAX_THEATRES_PER_SEARCH,
-      5,
-      LANDMARK_THEATRES.length,
-    );
     const sortBy = query.sortBy ?? "distance-asc";
     const candidateGroups: ShowtimeCandidate[][] = searchDates.map(() => []);
-    const selectedTheatres = theatres.slice(0, maxTheatres);
+    const selectedTheatres = theatres.slice(0, MAX_THEATRES_PER_SEARCH);
     const showtimeSettled = await Promise.allSettled(
       selectedTheatres.map(async (theatre) => ({
         showtimesByDate: await Promise.all(
@@ -357,19 +359,41 @@ export class LandmarkClient {
   }
 
   private getTheatreMovies(theatre: LandmarkTheatre): Promise<LandmarkMovie[]> {
-    return fetchLandmarkMovies(this.movieApiOrigin, theatre);
+    if (this.signal?.aborted) {
+      return Promise.reject(
+        this.signal.reason ??
+          new DOMException("The request was aborted.", "AbortError"),
+      );
+    }
+
+    const cached = this.requestMovieCache.get(theatre.slug);
+
+    if (cached) {
+      return cached;
+    }
+
+    const pending = fetchLandmarkMovies(
+      this.movieApiOrigin,
+      theatre,
+      this.signal,
+    );
+    const clearPending = () => {
+      if (this.requestMovieCache.get(theatre.slug) === pending) {
+        this.requestMovieCache.delete(theatre.slug);
+      }
+    };
+
+    this.requestMovieCache.set(theatre.slug, pending);
+    void pending.then(clearPending, clearPending);
+    return pending;
   }
 }
 
 async function fetchLandmarkMovies(
   movieApiOrigin: string,
   theatre: LandmarkTheatre,
+  signal?: AbortSignal,
 ): Promise<LandmarkMovie[]> {
-  const cacheSeconds = readPositiveInteger(
-    process.env.LANDMARK_MOVIE_CACHE_SECONDS,
-    DEFAULT_MOVIE_CACHE_SECONDS,
-    MAX_MOVIE_CACHE_SECONDS,
-  );
   const movieUrl = new URL(
     `/movies/${LANDMARK_CIRCUIT_ID}/${encodeURIComponent(theatre.providerTheatreId)}`,
     movieApiOrigin,
@@ -383,11 +407,7 @@ async function fetchLandmarkMovies(
     return cached.value;
   }
 
-  const value = fetchLandmarkMovieResponse(movieUrl);
-  const entry = {
-    expiresAt: now + cacheSeconds * 1_000,
-    value,
-  };
+  const value = await fetchLandmarkMovieResponse(movieUrl, signal);
 
   if (sharedMovieCache.size >= MAX_MOVIE_CACHE_ENTRIES) {
     const oldestKey = sharedMovieCache.keys().next().value;
@@ -397,11 +417,9 @@ async function fetchLandmarkMovies(
     }
   }
 
-  sharedMovieCache.set(movieUrl, entry);
-  void value.catch(() => {
-    if (sharedMovieCache.get(movieUrl) === entry) {
-      sharedMovieCache.delete(movieUrl);
-    }
+  sharedMovieCache.set(movieUrl, {
+    expiresAt: Date.now() + DEFAULT_MOVIE_CACHE_SECONDS * 1_000,
+    value,
   });
 
   return value;
@@ -409,20 +427,32 @@ async function fetchLandmarkMovies(
 
 async function fetchLandmarkMovieResponse(
   url: string,
+  signal?: AbortSignal,
 ): Promise<LandmarkMovie[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  const abortFromCaller = () => controller.abort(signal?.reason);
+
+  if (signal?.aborted) {
+    abortFromCaller();
+  } else {
+    signal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
 
   try {
+    const browserRequest = typeof window !== "undefined";
     const response = await fetch(url, {
       cache: "no-store",
-      headers: {
-        Accept: "application/json",
-        "Accept-Language": "en-CA,en;q=0.9",
-        Origin: LANDMARK_PUBLIC_ORIGIN,
-        Referer: `${LANDMARK_PUBLIC_ORIGIN}/`,
-        "User-Agent": standardUserAgent(),
-      },
+      credentials: "omit",
+      headers: browserRequest
+        ? { Accept: "application/json" }
+        : {
+            Accept: "application/json",
+            "Accept-Language": "en-CA,en;q=0.9",
+            Origin: LANDMARK_PUBLIC_ORIGIN,
+            Referer: `${LANDMARK_PUBLIC_ORIGIN}/`,
+            "User-Agent": standardUserAgent(),
+          },
       signal: controller.signal,
     });
 
@@ -435,6 +465,7 @@ async function fetchLandmarkMovieResponse(
     return parseLandmarkMovies(await response.json());
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -712,17 +743,6 @@ function toText(value: unknown): string {
   return typeof value === "string" || typeof value === "number"
     ? String(value)
     : "";
-}
-
-function readPositiveInteger(
-  value: string | undefined,
-  fallback: number,
-  maximum: number,
-): number {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0
-    ? Math.min(parsed, maximum)
-    : fallback;
 }
 
 function matchesTheatreText(
