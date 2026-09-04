@@ -49,16 +49,7 @@ type LandmarkShowtimeTime = {
   StartTime?: string;
 };
 
-type LandmarkExperienceGroup = {
-  ExperienceAttributes?: Array<{
-    Description?: string;
-    Name?: string;
-  }>;
-  Times?: LandmarkShowtimeTime[];
-};
-
 type LandmarkSession = {
-  ExperienceTypes?: LandmarkExperienceGroup[];
   NewDate?: string;
   Times?: LandmarkShowtimeTime[];
 };
@@ -83,10 +74,6 @@ type ShowtimeCandidate = {
 };
 
 export class LandmarkClient {
-  private readonly requestMovieCache = new Map<
-    string,
-    Promise<LandmarkMovie[]>
-  >();
   private readonly movieApiOrigin: string;
   private readonly now: () => Date;
 
@@ -265,22 +252,7 @@ export class LandmarkClient {
           continue;
         }
 
-        const sessionTimes = [
-          ...(session.Times ?? []).map((time) => ({
-            fallbackExperiences: [] as LandmarkExperience[],
-            time,
-          })),
-          ...(session.ExperienceTypes ?? []).flatMap(
-            (experienceGroup) =>
-              (experienceGroup.Times ?? []).map((time) => ({
-                fallbackExperiences:
-                  experienceGroup.ExperienceAttributes ?? [],
-                time,
-              })),
-          ),
-        ];
-
-        for (const { fallbackExperiences, time } of sessionTimes) {
+        for (const time of session.Times ?? []) {
           const cinemaId = toId(time.CinemaId);
           const externalSessionId = toId(time.ExternalSessionId);
           const sessionId = toId(time.Scheduleid);
@@ -299,11 +271,8 @@ export class LandmarkClient {
             continue;
           }
 
-          const experiences = time.Experience?.length
-            ? time.Experience
-            : fallbackExperiences;
           const format = normalizeLandmarkFormat(
-            experiences.map(
+            (time.Experience ?? []).map(
               (experience) =>
                 experience.Name ?? experience.Description ?? "",
             ),
@@ -381,18 +350,8 @@ export class LandmarkClient {
     };
   }
 
-  private getTheatreMovies(
-    theatre: LandmarkTheatre,
-  ): Promise<LandmarkMovie[]> {
-    const cached = this.requestMovieCache.get(theatre.slug);
-
-    if (cached) {
-      return cached;
-    }
-
-    const pending = fetchLandmarkMovies(this.movieApiOrigin, theatre);
-    this.requestMovieCache.set(theatre.slug, pending);
-    return pending;
+  private getTheatreMovies(theatre: LandmarkTheatre): Promise<LandmarkMovie[]> {
+    return fetchLandmarkMovies(this.movieApiOrigin, theatre);
   }
 }
 
@@ -486,10 +445,96 @@ export function parseLandmarkMovies(value: unknown): LandmarkMovie[] {
     throw new Error("Landmark returned invalid movie data.");
   }
 
-  return value.filter(
-    (movie): movie is LandmarkMovie =>
-      typeof movie === "object" && movie !== null,
+  if (!value.every(isLandmarkMovie)) {
+    throw new Error("Landmark returned invalid movie data.");
+  }
+
+  return value;
+}
+
+function isLandmarkMovie(value: unknown): value is LandmarkMovie {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const filmId = toId(value.FilmId);
+
+  if (!filmId || !isNumericId(filmId) || !isNonEmptyString(value.Title)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value.Sessions) &&
+    value.Sessions.every(isLandmarkSession)
   );
+}
+
+function isLandmarkSession(value: unknown): value is LandmarkSession {
+  if (!isRecord(value) || !isNonEmptyString(value.NewDate)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value.Times) &&
+    value.Times.every(isLandmarkShowtimeTime)
+  );
+}
+
+function isLandmarkShowtimeTime(
+  value: unknown,
+): value is LandmarkShowtimeTime {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isOptionalIdValue(value.CinemaId) &&
+    isOptionalString(value.CinemaName) &&
+    isOptionalIdValue(value.ExternalSessionId) &&
+    isOptionalIdValue(value.Scheduleid) &&
+    isOptionalString(value.Screen) &&
+    isOptionalBoolean(value.SessionExpired) &&
+    isOptionalBoolean(value.SoldOut) &&
+    isOptionalString(value.StartTime) &&
+    (value.Experience === undefined ||
+      (Array.isArray(value.Experience) &&
+        value.Experience.every(isLandmarkExperience)))
+  );
+}
+
+function isLandmarkExperience(value: unknown): value is LandmarkExperience {
+  return (
+    isRecord(value) &&
+    isOptionalString(value.Description) &&
+    isOptionalString(value.ExternalId) &&
+    isOptionalString(value.Name)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isOptionalBoolean(value: unknown): value is boolean | undefined {
+  return value === undefined || typeof value === "boolean";
+}
+
+function isOptionalIdValue(
+  value: unknown,
+): value is number | string | undefined {
+  return (
+    value === undefined ||
+    typeof value === "string" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
 }
 
 export function buildLandmarkPurchaseUrl({

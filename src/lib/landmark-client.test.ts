@@ -30,6 +30,60 @@ test("validates Landmark movie API payloads", () => {
     () => parseLandmarkMovies({ movies }),
     /invalid movie data/,
   );
+  assert.throws(() => parseLandmarkMovies([null]), /invalid movie data/);
+  assert.throws(() => parseLandmarkMovies([{}]), /invalid movie data/);
+  assert.throws(
+    () =>
+      parseLandmarkMovies([
+        { FilmId: 42, Sessions: {}, Title: "Example Movie" },
+      ]),
+    /invalid movie data/,
+  );
+  assert.throws(
+    () =>
+      parseLandmarkMovies([
+        {
+          FilmId: 42,
+          Sessions: [
+            { NewDate: "2026-09-01", Times: [null] },
+          ],
+          Title: "Example Movie",
+        },
+      ]),
+    /invalid movie data/,
+  );
+  assert.throws(
+    () =>
+      parseLandmarkMovies([
+        {
+          FilmId: 42,
+          Sessions: [
+            {
+              NewDate: "2026-09-01",
+              Times: [{ StartTime: 1930 }],
+            },
+          ],
+          Title: "Example Movie",
+        },
+      ]),
+    /invalid movie data/,
+  );
+  assert.throws(
+    () =>
+      parseLandmarkMovies([
+        {
+          FilmId: 42,
+          Sessions: [
+            {
+              NewDate: "2026-09-01",
+              Times: [{ Experience: [{ Name: 2 }] }],
+            },
+          ],
+          Title: "Example Movie",
+        },
+      ]),
+    /invalid movie data/,
+  );
 });
 
 test("builds only valid Landmark purchase links", () => {
