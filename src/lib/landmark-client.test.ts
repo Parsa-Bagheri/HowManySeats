@@ -183,6 +183,8 @@ test("gets Landmark booking API data and normalizes its seat map", async (t) => 
                 { Column: 2, Row: "A", SeatId: "A2", SeatName: "A-2", Status: 1, Type: 1 },
                 { Column: 3, Row: "A", SeatId: "WC1", SeatName: "A-WC1", Type: 2 },
                 { Column: 4, Row: "A", SeatId: "C1", SeatName: "A-4", Style: 4, Type: 1 },
+                { Column: 5, Row: "A", SeatId: "A5", SeatName: "A-5", Status: 2, Type: 1 },
+                { Column: 6, Row: "A", SeatId: "A6", SeatName: "A-6", Status: 3, Type: 1 },
               ],
             },
           ],
@@ -200,8 +202,198 @@ test("gets Landmark booking API data and normalizes its seat map", async (t) => 
   assert.equal(preview.snapshot.sellableSeats, 2);
   assert.equal(preview.snapshot.occupiedEstimate, 1);
   assert.equal(preview.snapshot.accessibilityCount, 2);
-  assert.equal(preview.rows[0]?.seats.length, 4);
+  assert.equal(preview.rows[0]?.seats.length, 6);
   assert.equal(preview.rows[0]?.seats[0]?.status, "available");
+});
+
+test("counts repeated Landmark seat IDs by their auditorium position", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const rowFixtures: Array<{
+    label: string;
+    seatCount: number;
+    occupiedColumns: number[];
+    wheelchairColumns: number[];
+    companionColumns: number[];
+  }> = [
+    {
+      label: "A",
+      seatCount: 12,
+      occupiedColumns: [],
+      wheelchairColumns: [],
+      companionColumns: [],
+    },
+    {
+      label: "B",
+      seatCount: 9,
+      occupiedColumns: [],
+      wheelchairColumns: [3, 6, 7],
+      companionColumns: [2, 5, 8],
+    },
+    {
+      label: "C",
+      seatCount: 7,
+      occupiedColumns: [1, 2],
+      wheelchairColumns: [],
+      companionColumns: [],
+    },
+    {
+      label: "D",
+      seatCount: 7,
+      occupiedColumns: [1, 2, 3, 4, 5, 6, 7],
+      wheelchairColumns: [],
+      companionColumns: [],
+    },
+    {
+      label: "E",
+      seatCount: 10,
+      occupiedColumns: [1, 2, 3, 4],
+      wheelchairColumns: [],
+      companionColumns: [],
+    },
+    {
+      label: "F",
+      seatCount: 13,
+      occupiedColumns: [],
+      wheelchairColumns: [],
+      companionColumns: [],
+    },
+  ];
+  let wheelchairSeatId = 1;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    Response.json({
+      SeatLayoutData: {
+        Areas: rowFixtures.map((row, rowIndex) => ({
+          Rows: [
+            {
+              PhysicalName: row.label,
+              Seats: Array.from({ length: row.seatCount }, (_, index) => {
+                const column = index + 1;
+                const wheelchair = row.wheelchairColumns.includes(column);
+                const groupedColumns = [
+                  [2, 3],
+                  [5, 6],
+                  [8, 7],
+                ].find(
+                  (pair) =>
+                    row.label === "B" &&
+                    pair.includes(column) &&
+                    (wheelchair || row.companionColumns.includes(column)),
+                );
+                const areaId = rowIndex + 1;
+
+                return {
+                  AreaCategoryCode: "0001",
+                  AreaId: areaId,
+                  Column: column,
+                  Row: 0,
+                  SeatId: wheelchair ? `WC${wheelchairSeatId++}` : column,
+                  SeatsInGroup: groupedColumns
+                    ? Object.fromEntries(
+                        groupedColumns.map((groupColumn) => [
+                          groupColumn,
+                          {
+                            AreaNumber: areaId,
+                            ColumnIndex: groupColumn,
+                            RowIndex: 0,
+                          },
+                        ]),
+                      )
+                    : undefined,
+                  Status:
+                    row.label === "A" && column === 1
+                      ? 5
+                      : row.occupiedColumns.includes(column)
+                        ? 1
+                        : 0,
+                  Style: 0,
+                  Type: wheelchair ? 2 : 1,
+                };
+              }),
+            },
+          ],
+        })),
+      },
+    });
+
+  const preview = await fetchLandmarkSeatPreview("180", "11569889");
+
+  assert.equal(preview.snapshot.sellableSeats, 52);
+  assert.equal(preview.snapshot.occupiedEstimate, 13);
+  assert.equal(
+    preview.snapshot.sellableSeats - preview.snapshot.occupiedEstimate,
+    39,
+  );
+  assert.equal(preview.snapshot.accessibilityCount, 6);
+  assert.deepEqual(
+    preview.rows.map((row) => [row.label, row.seats.length]),
+    [
+      ["A", 12],
+      ["B", 9],
+      ["C", 7],
+      ["D", 7],
+      ["E", 10],
+      ["F", 13],
+    ],
+  );
+});
+
+test("reads canonical Vista seat positions", async (t) => {
+  const originalFetch = globalThis.fetch;
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async () =>
+    Response.json({
+      SeatLayoutData: {
+        Areas: [
+          {
+            AreaCategoryCode: "0001",
+            Rows: [
+              {
+                PhysicalName: "A",
+                Seats: [
+                  {
+                    Id: "1",
+                    Position: {
+                      AreaNumber: 1,
+                      ColumnIndex: 1,
+                      RowIndex: 0,
+                    },
+                    SeatStyle: 1,
+                    Status: 0,
+                  },
+                  {
+                    Id: "2",
+                    Position: {
+                      AreaNumber: 1,
+                      ColumnIndex: 2,
+                      RowIndex: 0,
+                    },
+                    SeatStyle: 1,
+                    Status: 1,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+  const preview = await fetchLandmarkSeatPreview("180", "11569889");
+
+  assert.equal(preview.snapshot.sellableSeats, 2);
+  assert.equal(preview.snapshot.occupiedEstimate, 1);
+  assert.deepEqual(
+    preview.rows.map((row) => [row.label, row.seats.length]),
+    [["A", 2]],
+  );
+  assert.equal(new Set(preview.rows[0]?.seats.map((seat) => seat.id)).size, 2);
 });
 
 test("uses the plain HTTP reader and shares its short-lived page cache", async (t) => {
