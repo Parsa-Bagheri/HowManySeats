@@ -47,7 +47,7 @@ import {
   type SearchFilters,
   type SearchState,
 } from "@/lib/search-state";
-import { fetchLandmarkSeatPreview } from "@/lib/landmark-seats";
+import { fetchLandmarkSeatSnapshot } from "@/lib/landmark-seats";
 import type {
   CinemaProvider,
   MovieSuggestion,
@@ -165,6 +165,12 @@ export default function HomePageClient({
   const loadedSavedState = useRef(false);
   const movieTitleFocused = useRef(false);
   const skipNextMovieSuggestionFetch = useRef(false);
+  const activeSearchController = useRef<AbortController | undefined>(undefined);
+  const activeSearchId = useRef(0);
+  const lastAppliedFilterSignature = useRef<string | undefined>(undefined);
+  const latestSearchState = useRef(searchState);
+
+  latestSearchState.current = searchState;
 
   const {
     location,
@@ -178,6 +184,7 @@ export default function HomePageClient({
     sortBy,
     filters,
   } = searchState;
+  const filterSignature = getFilterSignature(searchState);
   const selectedDateIsToday = date === today && endDate === today;
   const activeFilterCount =
     Object.values(getEffectiveFilters(searchState, today)).filter(Boolean)
@@ -258,6 +265,13 @@ export default function HomePageClient({
   }, []);
 
   const executeSearch = useCallback(async (state: SearchState) => {
+    const requestId = activeSearchId.current + 1;
+    const controller = new AbortController();
+
+    activeSearchId.current = requestId;
+    activeSearchController.current?.abort();
+    activeSearchController.current = controller;
+    lastAppliedFilterSignature.current = getFilterSignature(state);
     setLoading(true);
     setError(undefined);
     setResults([]);
@@ -266,36 +280,71 @@ export default function HomePageClient({
     window.history.replaceState(null, "", `/?${params.toString()}`);
 
     try {
-      const response = await fetch(`/api/search?${params.toString()}`);
+      const response = await fetch(`/api/search?${params.toString()}`, {
+        signal: controller.signal,
+      });
       const body = (await response.json()) as
         | { results: SearchCandidate[] }
         | { error: string };
 
       if (!response.ok || !("results" in body)) {
-        setResults([]);
-        setError(
-          "error" in body
-            ? body.error
-            : "Search is temporarily unavailable. Try again.",
-        );
+        if (requestId === activeSearchId.current) {
+          setResults([]);
+          setError(
+            "error" in body
+              ? body.error
+              : "Search is temporarily unavailable. Try again.",
+          );
+        }
         return;
       }
 
-      setResults(await loadSeatSnapshots(body.results, state));
-    } catch {
-      setResults([]);
-      setError(
-        "Search is temporarily unavailable. Check your connection and try again.",
+      const nextResults = await loadSeatSnapshots(
+        body.results,
+        state,
+        controller.signal,
       );
+
+      if (requestId === activeSearchId.current) {
+        setResults(nextResults);
+      }
+    } catch {
+      if (!controller.signal.aborted && requestId === activeSearchId.current) {
+        setResults([]);
+        setError(
+          "Search is temporarily unavailable. Check your connection and try again.",
+        );
+      }
     } finally {
-      setLoading(false);
-      setHasSearched(true);
+      if (requestId === activeSearchId.current) {
+        setLoading(false);
+        setHasSearched(true);
+      }
     }
   }, []);
 
   const onMovieSuggestionsClose = useCallback(() => {
     setMovieSuggestionsOpen(false);
   }, []);
+
+  useEffect(() => {
+    return () => activeSearchController.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    if (
+      !hasSearched ||
+      filterSignature === lastAppliedFilterSignature.current
+    ) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void executeSearch(latestSearchState.current);
+    }, 200);
+
+    return () => window.clearTimeout(timeout);
+  }, [executeSearch, filterSignature, hasSearched]);
 
   useEffect(() => {
     try {
@@ -500,6 +549,7 @@ function rememberUiModePreference(mode: UiMode) {
 async function loadSeatSnapshots(
   candidates: SearchCandidate[],
   state: SearchState,
+  signal: AbortSignal,
 ): Promise<SearchResult[]> {
   const results: Array<SearchResult | undefined> = new Array(
     candidates.length,
@@ -510,6 +560,10 @@ async function loadSeatSnapshots(
     offset < candidates.length;
     offset += LANDMARK_SEAT_CHECK_CONCURRENCY
   ) {
+    if (signal.aborted) {
+      return [];
+    }
+
     const batch = candidates.slice(
       offset,
       offset + LANDMARK_SEAT_CHECK_CONCURRENCY,
@@ -523,17 +577,22 @@ async function loadSeatSnapshots(
           result = candidate as SearchResult;
         } else if (candidate.theatre.provider === "landmark") {
           try {
-            const preview = await fetchLandmarkSeatPreview(
+            const snapshot = await fetchLandmarkSeatSnapshot(
               candidate.theatre.providerTheatreId,
               candidate.showtime.providerShowtimeId,
+              signal,
             );
-            result = { ...candidate, snapshot: preview.snapshot };
+            result = { ...candidate, snapshot };
           } catch {
             return;
           }
         }
 
-        if (result && matchesSeatFilters(result, state.filters)) {
+        if (
+          !signal.aborted &&
+          result &&
+          matchesSeatFilters(result, state.filters)
+        ) {
           results[offset + batchIndex] = result;
         }
       }),
@@ -1524,6 +1583,10 @@ function CleanFilterToggle({
 function CleanResultCard({ result }: { result: SearchResult }) {
   const startsAt = new Date(result.showtime.startsAt);
   const checkedAt = new Date(result.snapshot.checkedAt);
+  const availableSeats = Math.max(
+    0,
+    result.snapshot.sellableSeats - result.snapshot.occupiedEstimate,
+  );
   const providerLabel = cinemaProviderLabel(result.theatre.provider);
   const timeZoneOptions = theatreTimeZoneOptions(result.theatre);
   const showtimeLinkContext = `${result.showtime.movieTitle} at ${result.theatre.name} on ${startsAt.toLocaleString([], timeZoneOptions)}`;
@@ -1603,11 +1666,12 @@ function CleanResultCard({ result }: { result: SearchResult }) {
 
         <div className="grid min-w-56 gap-1 rounded-md border border-neutral-800 bg-black/35 p-3 text-sm">
           <p className="font-semibold text-white">
-            {result.snapshot.occupiedEstimate} occupied /{" "}
+            {availableSeats} available /{" "}
             {result.snapshot.sellableSeats} seats
           </p>
           <p className="text-neutral-400">
-            Last checked {relativeMinutes(checkedAt)} min ago
+            {result.snapshot.occupiedEstimate} occupied · Last checked{" "}
+            {relativeMinutes(checkedAt)} min ago
           </p>
         </div>
       </div>
@@ -1930,4 +1994,11 @@ function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
   return typeof action === "function"
     ? (action as (value: T) => T)(current)
     : action;
+}
+
+function getFilterSignature(state: SearchState): string {
+  return JSON.stringify({
+    experienceTypes: [...state.experienceTypes].sort(),
+    filters: state.filters,
+  });
 }

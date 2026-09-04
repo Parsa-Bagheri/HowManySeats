@@ -56,9 +56,9 @@ requests go directly from the visitor to the first-party JSON API. The app
 doesn't launch an automated browser. A Jina API key is optional for development
 and raises the service's rate limit for production traffic.
 
-Landmark opens seat previews in a modal instead of providing a standalone
-preview URL. HowManySeats provides a read-only preview page and links each
-Landmark result to that page. Ticket purchases continue on Landmark's website.
+Landmark provides its seat preview inside the official booking page instead of
+at a standalone URL. Both Landmark actions open that official page. Select
+**Preview Seatmap** there to view the current seat layout.
 
 ## Seat estimates
 
@@ -67,8 +67,8 @@ The estimate comes from the current preview seat map:
 - `Available` standard seats count as open.
 - `Occupied`, `Sold`, `Held`, and `Reserved` standard seats count toward the
   occupied estimate.
-- Wheelchair and companion seats count as accessible seats. Other seat types
-  and statuses are excluded from the estimate.
+- Wheelchair and companion seats count as accessible seats. Broken, house, and
+  unknown seat statuses are excluded from the estimate.
 
 Seat availability can change at any time. Treat the numbers as a snapshot, not
 as a guarantee from either cinema provider.

@@ -1,3 +1,4 @@
+import tzLookup from "@photostructure/tz-lookup";
 import {
   distanceKm,
   getProvinceCode,
@@ -6,6 +7,7 @@ import {
 } from "./geo";
 import { getSearchDates } from "./date-range";
 import { showtimeMatchesExperienceTypes } from "./experience-types";
+import { normalizeLocalIsoDateTime } from "./showtime-time";
 import { buildSeatSnapshot } from "./seat-scoring";
 import type {
   MovieSuggestion,
@@ -99,18 +101,22 @@ type ShowtimeCandidate = {
 
 export class CineplexClient {
   private readonly headers: HeadersInit;
+  private readonly now: () => Date;
 
   constructor(
     subscriptionKey = process.env.CINEPLEX_APIM_SUBSCRIPTION_KEY ||
       PUBLIC_SITE_KEY,
+    now: () => Date = () => new Date(),
   ) {
     this.headers = {
       Accept: "application/json",
       "Ocp-Apim-Subscription-Key": subscriptionKey,
     };
+    this.now = now;
   }
 
   async search(query: SearchQuery): Promise<SearchResult[]> {
+    const searchStartedAt = this.now();
     const { origin, theatres } = await this.resolveSearchArea(query);
     const searchDates = getValidatedSearchDates(query);
     const maxTheatres = Number(
@@ -134,7 +140,11 @@ export class CineplexClient {
 
     for (const { theatre, showtimesByDate } of showtimeGroups) {
       for (const [dateIndex, showtimes] of showtimesByDate.entries()) {
-        const matchingShowtimes = this.filterShowtimes(showtimes, query);
+        const matchingShowtimes = this.filterShowtimes(
+          showtimes,
+          query,
+          searchStartedAt,
+        );
 
         for (const showtime of matchingShowtimes) {
           candidateGroups[dateIndex].push({
@@ -326,12 +336,21 @@ export class CineplexClient {
                 ", ",
               );
               const dbox = /D-BOX/i.test(format);
+              const startsAt = normalizeLocalIsoDateTime(
+                session.showStartDateTime,
+                theatre.timeZone,
+              );
+
+              if (!startsAt) {
+                continue;
+              }
+
               showtimes.push({
                 id: `cineplex-${theatre.providerTheatreId}-${session.vistaSessionId}`,
                 providerShowtimeId: String(session.vistaSessionId),
                 theatreId: theatre.id,
                 movieTitle: movie.name,
-                startsAt: session.showStartDateTime,
+                startsAt,
                 format,
                 auditorium: session.auditorium,
                 purchaseUrl:
@@ -400,12 +419,18 @@ export class CineplexClient {
   private filterShowtimes(
     showtimes: Showtime[],
     query: SearchQuery,
+    now: Date,
   ): Showtime[] {
     const movieFilter = query.movieTitle?.trim().toLowerCase();
-    const now = new Date();
     const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
     return showtimes.filter((showtime) => {
+      const startsAt = new Date(showtime.startsAt);
+
+      if (Number.isNaN(startsAt.getTime()) || startsAt < now) {
+        return false;
+      }
+
       if (
         movieFilter &&
         !showtime.movieTitle.toLowerCase().includes(movieFilter)
@@ -430,8 +455,7 @@ export class CineplexClient {
         return true;
       }
 
-      const startsAt = new Date(showtime.startsAt);
-      return startsAt >= now && startsAt <= twoHoursFromNow;
+      return startsAt <= twoHoursFromNow;
     });
   }
 
@@ -601,6 +625,9 @@ function compareMovieSuggestions(
 }
 
 function toTheatre(theatre: CineplexTheatre): Theatre {
+  const latitude = theatre.location?.geoLocation?.latitude;
+  const longitude = theatre.location?.geoLocation?.longitude;
+
   return {
     id: `cineplex-${theatre.theatreId}`,
     provider: "cineplex",
@@ -610,9 +637,25 @@ function toTheatre(theatre: CineplexTheatre): Theatre {
     city: theatre.location?.city ?? "",
     province: theatre.location?.provinceCode ?? "",
     postalCode: theatre.location?.postalCode,
-    latitude: theatre.location?.geoLocation?.latitude,
-    longitude: theatre.location?.geoLocation?.longitude,
+    latitude,
+    longitude,
+    timeZone: getTimeZone(latitude, longitude),
   };
+}
+
+function getTimeZone(
+  latitude: number | undefined,
+  longitude: number | undefined,
+): string | undefined {
+  if (latitude === undefined || longitude === undefined) {
+    return undefined;
+  }
+
+  try {
+    return tzLookup(latitude, longitude);
+  } catch {
+    return undefined;
+  }
 }
 
 function buildPublicSeatMapUrl(

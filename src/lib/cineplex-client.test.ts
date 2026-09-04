@@ -87,11 +87,13 @@ test("maps purchase and preview links from Cineplex showtimes", async (t) => {
       name: "Example Theatre",
       city: "Example City",
       province: "ON",
+      timeZone: "America/Toronto",
     },
     "2026-08-31",
   );
 
   assert.equal(showtimes[0]?.purchaseUrl, purchaseUrl);
+  assert.equal(showtimes[0]?.startsAt, "2026-08-31T23:00:00.000Z");
   assert.equal(showtimes[0]?.seatPreviewUrl, seatPreviewUrl);
   assert.equal(showtimes[1]?.purchaseUrl, undefined);
   assert.equal(
@@ -162,11 +164,18 @@ test("checks seat maps in bounded parallel batches", async (t) => {
                   experiences: [
                     {
                       experienceTypes: ["Regular"],
-                      sessions: Array.from({ length: 5 }, (_, index) => ({
-                        vistaSessionId: 1000 + index,
-                        showStartDateTime: `2026-09-01T${10 + index}:00:00`,
-                        isReservedSeating: true,
-                      })),
+                      sessions: [
+                        {
+                          vistaSessionId: 999,
+                          showStartDateTime: "2026-09-01T07:00:00",
+                          isReservedSeating: true,
+                        },
+                        ...Array.from({ length: 5 }, (_, index) => ({
+                          vistaSessionId: 1000 + index,
+                          showStartDateTime: `2026-09-01T${10 + index}:00:00`,
+                          isReservedSeating: true,
+                        })),
+                      ],
                     },
                   ],
                 },
@@ -195,7 +204,10 @@ test("checks seat maps in bounded parallel batches", async (t) => {
     throw new Error(`Unexpected request: ${url}`);
   };
 
-  const client = new CineplexClient("test-key");
+  const client = new CineplexClient(
+    "test-key",
+    () => new Date("2026-09-01T12:00:00.000Z"),
+  );
   const results = await client.search({
     location: "Toronto",
     date: "2026-09-01",

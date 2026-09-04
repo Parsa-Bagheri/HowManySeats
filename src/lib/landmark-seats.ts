@@ -24,42 +24,31 @@ type LandmarkSeatRecord = Record<string, unknown> & {
   Type?: number | string;
 };
 
-export type LandmarkPreviewSeat = {
-  accessible: boolean;
-  column: number;
-  id: string;
-  label: string;
-  status: "available" | "unavailable";
-};
-
-export type LandmarkPreviewRow = {
-  label: string;
-  seats: LandmarkPreviewSeat[];
-};
-
-export type LandmarkSeatPreview = {
-  checkedAt: string;
-  rows: LandmarkPreviewRow[];
-  snapshot: SeatSnapshot;
-};
-
-export async function fetchLandmarkSeatPreview(
+export async function fetchLandmarkSeatSnapshot(
   cinemaId: string,
   sessionId: string,
-): Promise<LandmarkSeatPreview> {
+  signal?: AbortSignal,
+): Promise<SeatSnapshot> {
   if (!isNumericId(cinemaId) || !isNumericId(sessionId)) {
-    throw new Error("The Landmark seat preview link is invalid.");
+    throw new Error("The Landmark showtime identifiers are invalid.");
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  const abortFromCaller = () => controller.abort();
+
+  if (signal?.aborted) {
+    controller.abort();
+  } else {
+    signal?.addEventListener("abort", abortFromCaller, { once: true });
+  }
 
   try {
-    const seatMapUrl = new URL(
+    const seatDataUrl = new URL(
       `/api/Seating/GetSessionSeatData/${encodeURIComponent(cinemaId)}/${encodeURIComponent(sessionId)}`,
       LANDMARK_BOOKING_API_ORIGIN,
     );
-    const response = await fetch(seatMapUrl, {
+    const response = await fetch(seatDataUrl, {
       cache: "no-store",
       headers: { Accept: "application/json" },
       signal: controller.signal,
@@ -68,37 +57,31 @@ export async function fetchLandmarkSeatPreview(
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new Error(
-        `Landmark seat preview failed with HTTP ${response.status}: ${body.slice(0, 160)}`,
+        `Landmark seat data failed with HTTP ${response.status}: ${body.slice(0, 160)}`,
       );
     }
 
-    return buildLandmarkSeatPreview(await response.json());
+    return buildLandmarkSeatSnapshot(await response.json());
   } finally {
     clearTimeout(timeout);
+    signal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
-function buildLandmarkSeatPreview(data: unknown): LandmarkSeatPreview {
+export function buildLandmarkSeatSnapshot(data: unknown): SeatSnapshot {
   const records = collectSeatRecords(data);
 
   if (!records.length) {
-    throw new Error("Landmark returned an empty seat preview.");
+    throw new Error("Landmark returned empty seat data.");
   }
 
-  const checkedAt = new Date();
   const accessibilityTypes = getAccessibilityTypes(records);
-  const snapshot = buildSeatSnapshot(
+
+  return buildSeatSnapshot(
     records.map((record) =>
       toRawSeat(record, accessibilityTypes.get(getRecordKey(record))),
     ),
-    checkedAt,
   );
-
-  return {
-    checkedAt: checkedAt.toISOString(),
-    rows: buildPreviewRows(records, accessibilityTypes),
-    snapshot,
-  };
 }
 
 function collectSeatRecords(value: unknown): LandmarkSeatRecord[] {
@@ -137,9 +120,7 @@ function collectSeatRecords(value: unknown): LandmarkSeatRecord[] {
       id &&
       (object.Status !== undefined ||
         position !== undefined ||
-        (object.Row !== undefined &&
-          object.Column !== undefined &&
-          object.Type !== undefined))
+        (object.Row !== undefined && object.Column !== undefined))
     ) {
       const seat = {
         ...object,
@@ -171,44 +152,6 @@ function toRawSeat(
     status: getSeatAvailability(record.Status),
     type: accessibilityType,
   };
-}
-
-function buildPreviewRows(
-  records: LandmarkSeatRecord[],
-  accessibilityTypes: Map<string, "wheelchair" | "companion">,
-): LandmarkPreviewRow[] {
-  const rows = new Map<string, LandmarkPreviewSeat[]>();
-
-  records.forEach((record, index) => {
-    const seatName = toText(record.SeatName);
-    const rowLabel = getSeatRowLabel(record, seatName);
-    const column = getSeatColumn(record, seatName, index);
-    const seatNumber = toText(record.SeatId) || String(column);
-    const label =
-      seatName ||
-      (rowLabel === "Seats" ? `Seat ${index + 1}` : `${rowLabel}-${seatNumber}`);
-    const row = rows.get(rowLabel) ?? [];
-    const accessibilityType = accessibilityTypes.get(getRecordKey(record));
-    const availability = getSeatAvailability(record.Status);
-
-    row.push({
-      accessible: Boolean(accessibilityType),
-      column,
-      id: getRecordKey(record, label),
-      label,
-      status: availability === "available" ? "available" : "unavailable",
-    });
-    rows.set(rowLabel, row);
-  });
-
-  return Array.from(rows, ([label, seats]) => ({
-    label,
-    seats: seats.sort(
-      (a, b) => a.column - b.column || a.label.localeCompare(b.label),
-    ),
-  })).sort((a, b) =>
-    a.label.localeCompare(b.label, undefined, { numeric: true }),
-  );
 }
 
 function getAccessibilityTypes(
@@ -257,6 +200,7 @@ function getExplicitAccessibilityType(
     .map(toText)
     .join(" ")
     .toLowerCase();
+  const seatStyle = Number(record.SeatStyle);
 
   if (/\bwc\d*\b|wheelchair/.test(label) || /wheelchair/.test(details)) {
     return "wheelchair";
@@ -266,11 +210,11 @@ function getExplicitAccessibilityType(
     return "companion";
   }
 
-  if (Number(record.Type) === 2) {
+  if (Number(record.Type) === 2 || seatStyle === 3) {
     return "wheelchair";
   }
 
-  if (Number(record.Style) === 4) {
+  if (Number(record.Style) === 4 || seatStyle === 7) {
     return "companion";
   }
 
@@ -348,16 +292,13 @@ function getSeatAvailability(
 
   const normalized = toText(status).trim().toLowerCase();
 
-  if (
-    normalized === "0" ||
-    normalized === "5" ||
-    normalized === "available"
-  ) {
+  if (normalized === "0" || normalized === "available") {
     return "available";
   }
 
   if (
     normalized === "1" ||
+    normalized === "4" ||
     normalized === "occupied" ||
     normalized === "sold" ||
     normalized === "held" ||
@@ -367,33 +308,6 @@ function getSeatAvailability(
   }
 
   return "unavailable";
-}
-
-function getSeatRowLabel(
-  record: LandmarkSeatRecord,
-  seatLabel: string,
-): string {
-  const physicalName = toText(record.PhysicalName).trim();
-
-  if (physicalName) {
-    return physicalName;
-  }
-
-  const labelRow = seatLabel.includes("-")
-    ? seatLabel.split("-", 1)[0]?.trim()
-    : undefined;
-
-  if (labelRow) {
-    return labelRow;
-  }
-
-  const row = toText(record.Row).trim();
-
-  if (row) {
-    return row;
-  }
-
-  return "Seats";
 }
 
 function getSeatKey(record: LandmarkSeatRecord, id: string): string {
@@ -421,26 +335,11 @@ function getSeatKey(record: LandmarkSeatRecord, id: string): string {
   return fallbackPosition.every(Boolean) ? fallbackPosition.join("|") : id;
 }
 
-function getRecordKey(record: LandmarkSeatRecord, fallback = ""): string {
+function getRecordKey(record: LandmarkSeatRecord): string {
   return getSeatKey(
     record,
-    toText(record.SeatId) || toText(record.SeatName) || fallback,
+    toText(record.SeatId) || toText(record.SeatName) || toText(record.Id),
   );
-}
-
-function getSeatColumn(
-  record: LandmarkSeatRecord,
-  seatLabel: string,
-  fallback: number,
-): number {
-  const explicitColumn = Number(record.Column);
-
-  if (Number.isFinite(explicitColumn)) {
-    return explicitColumn;
-  }
-
-  const labelColumn = Number(seatLabel.match(/(\d+)$/)?.[1]);
-  return Number.isFinite(labelColumn) ? labelColumn : fallback;
 }
 
 function isNumericId(value: string): boolean {

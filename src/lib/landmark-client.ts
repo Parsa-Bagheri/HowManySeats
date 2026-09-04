@@ -11,6 +11,7 @@ import {
   LANDMARK_THEATRES,
   type LandmarkTheatre,
 } from "./landmark-theatres";
+import { localDateTimeToIso } from "./showtime-time";
 import type {
   MovieSuggestion,
   MovieSuggestionQuery,
@@ -94,10 +95,15 @@ export class LandmarkClient {
   >();
   private readonly readerFirst: boolean;
   private readonly sourceOrigins: readonly string[];
+  private readonly now: () => Date;
 
-  constructor(sourceOrigins?: readonly string[]) {
+  constructor(
+    sourceOrigins?: readonly string[],
+    now: () => Date = () => new Date(),
+  ) {
     this.readerFirst = sourceOrigins === undefined;
     this.sourceOrigins = sourceOrigins ?? getConfiguredSourceOrigins();
+    this.now = now;
   }
 
   async search(query: SearchQuery): Promise<SearchCandidate[]> {
@@ -105,6 +111,7 @@ export class LandmarkClient {
   }
 
   private async performSearch(query: SearchQuery): Promise<SearchCandidate[]> {
+    const searchStartedAt = this.now();
     const { origin, theatres } = await this.resolveSearchArea(query);
     const searchDates = getValidatedSearchDates(query);
     const maxTheatres = readPositiveInteger(
@@ -150,7 +157,11 @@ export class LandmarkClient {
       const { theatre, showtimesByDate } = settled.value;
 
       for (const [dateIndex, showtimes] of showtimesByDate.entries()) {
-        for (const showtime of filterShowtimes(showtimes, query)) {
+        for (const showtime of filterShowtimes(
+          showtimes,
+          query,
+          searchStartedAt,
+        )) {
           candidateGroups[dateIndex].push({
             distanceKm: getDistanceFromOrigin(origin, theatre),
             showtime,
@@ -293,26 +304,25 @@ export class LandmarkClient {
               ),
             );
 
+            const bookingUrl = buildLandmarkPurchaseUrl({
+              cinemaId,
+              externalSessionId,
+              filmId,
+              sessionId,
+            });
+
+            if (!bookingUrl) {
+              continue;
+            }
+
             showtimes.push({
               auditorium: time.Screen?.trim() || undefined,
               format,
               id: `landmark-${cinemaId}-${sessionId}`,
               movieTitle,
               providerShowtimeId: sessionId,
-              purchaseUrl: buildLandmarkPurchaseUrl({
-                cinemaId,
-                externalSessionId,
-                filmId,
-                sessionId,
-              }),
-              seatPreviewUrl: buildLandmarkSeatPreviewUrl({
-                cinemaId,
-                externalSessionId,
-                filmId,
-                movieTitle,
-                sessionId,
-                startsAt,
-              }),
+              purchaseUrl: bookingUrl,
+              seatPreviewUrl: bookingUrl,
               startsAt,
               theatreId: landmarkTheatre.id,
             });
@@ -604,68 +614,6 @@ export function buildLandmarkPurchaseUrl({
   return url.toString();
 }
 
-export function localDateTimeToIso(
-  date: string,
-  time: string,
-  timeZone: string,
-): string | undefined {
-  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  const timeMatch = /^(\d{1,2}):(\d{2})\s*([AP]M)$/i.exec(time.trim());
-
-  if (!dateMatch || !timeMatch) {
-    return undefined;
-  }
-
-  let hour = Number(timeMatch[1]) % 12;
-
-  if (timeMatch[3].toUpperCase() === "PM") {
-    hour += 12;
-  }
-
-  const targetLocalAsUtc = Date.UTC(
-    Number(dateMatch[1]),
-    Number(dateMatch[2]) - 1,
-    Number(dateMatch[3]),
-    hour,
-    Number(timeMatch[2]),
-  );
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    hour: "2-digit",
-    hourCycle: "h23",
-    minute: "2-digit",
-    month: "2-digit",
-    timeZone,
-    year: "numeric",
-  });
-  let instant = targetLocalAsUtc;
-
-  for (let iteration = 0; iteration < 3; iteration += 1) {
-    const parts = Object.fromEntries(
-      formatter
-        .formatToParts(new Date(instant))
-        .filter((part) => part.type !== "literal")
-        .map((part) => [part.type, Number(part.value)]),
-    );
-    const formattedLocalAsUtc = Date.UTC(
-      parts.year,
-      parts.month - 1,
-      parts.day,
-      parts.hour,
-      parts.minute,
-    );
-    const adjustment = targetLocalAsUtc - formattedLocalAsUtc;
-
-    instant += adjustment;
-
-    if (adjustment === 0) {
-      break;
-    }
-  }
-
-  return new Date(instant).toISOString();
-}
-
 function getConfiguredSourceOrigins(): string[] {
   const configured = process.env.LANDMARK_SOURCE_ORIGIN?.trim();
 
@@ -714,12 +662,18 @@ function getValidatedSearchDates(
 function filterShowtimes(
   showtimes: Showtime[],
   query: SearchQuery,
+  now: Date,
 ): Showtime[] {
   const movieFilter = query.movieTitle?.trim().toLowerCase();
-  const now = new Date();
   const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
   return showtimes.filter((showtime) => {
+    const startsAt = new Date(showtime.startsAt);
+
+    if (Number.isNaN(startsAt.getTime()) || startsAt < now) {
+      return false;
+    }
+
     if (
       movieFilter &&
       !showtime.movieTitle.toLowerCase().includes(movieFilter)
@@ -744,8 +698,7 @@ function filterShowtimes(
       return true;
     }
 
-    const startsAt = new Date(showtime.startsAt);
-    return startsAt >= now && startsAt <= twoHoursFromNow;
+    return startsAt <= twoHoursFromNow;
   });
 }
 
@@ -802,32 +755,6 @@ function normalizeLandmarkFormat(rawExperiences: string[]): string {
   }
 
   return Array.from(formats).join(", ");
-}
-
-function buildLandmarkSeatPreviewUrl({
-  cinemaId,
-  externalSessionId,
-  filmId,
-  movieTitle,
-  sessionId,
-  startsAt,
-}: {
-  cinemaId: string;
-  externalSessionId: string;
-  filmId: string;
-  movieTitle: string;
-  sessionId: string;
-  startsAt: string;
-}): string {
-  const params = new URLSearchParams({
-    cinemaId,
-    externalSessionId,
-    filmId,
-    sessionId,
-    startsAt,
-    title: movieTitle,
-  });
-  return `/landmark-seat-preview?${params}`;
 }
 
 function findJsonArrayEnd(value: string, start: number): number {

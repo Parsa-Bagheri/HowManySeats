@@ -4,11 +4,14 @@ import {
   buildLandmarkPurchaseUrl,
   extractLandmarkMovies,
   LandmarkClient,
-  localDateTimeToIso,
   type LandmarkMovie,
 } from "./landmark-client";
-import { fetchLandmarkSeatPreview } from "./landmark-seats";
+import {
+  buildLandmarkSeatSnapshot,
+  fetchLandmarkSeatSnapshot,
+} from "./landmark-seats";
 import { getLandmarkTheatre } from "./landmark-theatres";
+import { localDateTimeToIso } from "./showtime-time";
 
 const sourceOrigin = "https://source.landmark.test";
 const waterloo = getLandmarkTheatre("200");
@@ -79,6 +82,12 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
                 },
                 {
                   CinemaId: 200,
+                  ExternalSessionId: "181814",
+                  Scheduleid: "11567087",
+                  StartTime: "3:00 PM",
+                },
+                {
+                  CinemaId: 200,
                   ExternalSessionId: "181816",
                   Scheduleid: "11567089",
                   SoldOut: true,
@@ -119,7 +128,10 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
     throw new Error(`Unexpected request: ${url}`);
   };
 
-  const client = new LandmarkClient([sourceOrigin]);
+  const client = new LandmarkClient(
+    [sourceOrigin],
+    () => new Date("2026-09-01T20:00:00.000Z"),
+  );
   const showtimes = await client.getShowtimes(waterloo, "2026-09-01");
   const nextDay = await client.getShowtimes(waterloo, "2026-09-02");
   const candidates = await client.search({
@@ -132,7 +144,7 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
   });
 
   assert.equal(pageRequests, 1);
-  assert.equal(showtimes.length, 1);
+  assert.equal(showtimes.length, 2);
   assert.deepEqual(nextDay, []);
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0]?.snapshot, undefined);
@@ -146,14 +158,11 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
     "https://www.landmarkcinemas.com/booking?cinemaId=200&filmId=126642&externalSessionId=181815&sessionId=11567088",
   );
 
-  const previewUrl = new URL(
+  assert.equal(showtimes[0]?.seatPreviewUrl, showtimes[0]?.purchaseUrl);
+  assert.match(
     showtimes[0]?.seatPreviewUrl ?? "",
-    "https://howmanyseats.test",
+    /^https:\/\/www\.landmarkcinemas\.com\/booking\?/,
   );
-  assert.equal(previewUrl.pathname, "/landmark-seat-preview");
-  assert.equal(previewUrl.searchParams.get("cinemaId"), "200");
-  assert.equal(previewUrl.searchParams.get("filmId"), "126642");
-  assert.equal(previewUrl.searchParams.get("sessionId"), "11567088");
 });
 
 test("gets Landmark booking API data and normalizes its seat map", async (t) => {
@@ -195,15 +204,13 @@ test("gets Landmark booking API data and normalizes its seat map", async (t) => 
     throw new Error(`Unexpected request: ${url}`);
   };
 
-  const preview = await fetchLandmarkSeatPreview("200", "11567088");
+  const snapshot = await fetchLandmarkSeatSnapshot("200", "11567088");
 
   assert.equal(seatRequest?.method, undefined);
   assert.equal(seatRequest?.headers.get("accept"), "application/json");
-  assert.equal(preview.snapshot.sellableSeats, 2);
-  assert.equal(preview.snapshot.occupiedEstimate, 1);
-  assert.equal(preview.snapshot.accessibilityCount, 2);
-  assert.equal(preview.rows[0]?.seats.length, 6);
-  assert.equal(preview.rows[0]?.seats[0]?.status, "available");
+  assert.equal(snapshot.sellableSeats, 2);
+  assert.equal(snapshot.occupiedEstimate, 1);
+  assert.equal(snapshot.accessibilityCount, 2);
 });
 
 test("counts repeated Landmark seat IDs by their auditorium position", async (t) => {
@@ -319,26 +326,15 @@ test("counts repeated Landmark seat IDs by their auditorium position", async (t)
       },
     });
 
-  const preview = await fetchLandmarkSeatPreview("180", "11569889");
+  const snapshot = await fetchLandmarkSeatSnapshot("180", "11569889");
 
-  assert.equal(preview.snapshot.sellableSeats, 52);
-  assert.equal(preview.snapshot.occupiedEstimate, 13);
+  assert.equal(snapshot.sellableSeats, 51);
+  assert.equal(snapshot.occupiedEstimate, 13);
   assert.equal(
-    preview.snapshot.sellableSeats - preview.snapshot.occupiedEstimate,
-    39,
+    snapshot.sellableSeats - snapshot.occupiedEstimate,
+    38,
   );
-  assert.equal(preview.snapshot.accessibilityCount, 6);
-  assert.deepEqual(
-    preview.rows.map((row) => [row.label, row.seats.length]),
-    [
-      ["A", 12],
-      ["B", 9],
-      ["C", 7],
-      ["D", 7],
-      ["E", 10],
-      ["F", 13],
-    ],
-  );
+  assert.equal(snapshot.accessibilityCount, 6);
 });
 
 test("reads canonical Vista seat positions", async (t) => {
@@ -385,15 +381,39 @@ test("reads canonical Vista seat positions", async (t) => {
       },
     });
 
-  const preview = await fetchLandmarkSeatPreview("180", "11569889");
+  const snapshot = await fetchLandmarkSeatSnapshot("180", "11569889");
 
-  assert.equal(preview.snapshot.sellableSeats, 2);
-  assert.equal(preview.snapshot.occupiedEstimate, 1);
-  assert.deepEqual(
-    preview.rows.map((row) => [row.label, row.seats.length]),
-    [["A", 2]],
-  );
-  assert.equal(new Set(preview.rows[0]?.seats.map((seat) => seat.id)).size, 2);
+  assert.equal(snapshot.sellableSeats, 2);
+  assert.equal(snapshot.occupiedEstimate, 1);
+});
+
+test("uses Vista seat availability and accessibility values", () => {
+  const snapshot = buildLandmarkSeatSnapshot({
+    SeatLayoutData: {
+      Areas: [
+        {
+          Rows: [
+            {
+              Seats: [
+                seatFixture("available", 1, 0),
+                seatFixture("sold", 2, 1),
+                seatFixture("broken", 3, 2),
+                seatFixture("house", 4, 3),
+                seatFixture("reserved", 5, 4),
+                seatFixture("unknown", 6, 5),
+                { ...seatFixture("wheelchair", 7, 0), SeatStyle: 3 },
+                { ...seatFixture("companion", 8, 0), SeatStyle: 7 },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.equal(snapshot.sellableSeats, 3);
+  assert.equal(snapshot.occupiedEstimate, 2);
+  assert.equal(snapshot.accessibilityCount, 2);
 });
 
 test("uses the plain HTTP reader and shares its short-lived page cache", async (t) => {
@@ -471,7 +491,7 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
     waterloo,
     "2026-09-01",
   );
-  const preview = await fetchLandmarkSeatPreview("200", "11567088");
+  const snapshot = await fetchLandmarkSeatSnapshot("200", "11567088");
 
   assert.equal(readerRequests, 1);
   assert.equal(readerHeaders?.get("x-engine"), "direct");
@@ -479,7 +499,7 @@ test("uses the plain HTTP reader and shares its short-lived page cache", async (
   assert.equal(readerHeaders?.get("x-cache-tolerance"), "60");
   assert.equal(firstShowtimes.length, 1);
   assert.equal(secondShowtimes.length, 1);
-  assert.equal(preview.snapshot.sellableSeats, 1);
+  assert.equal(snapshot.sellableSeats, 1);
   assert.deepEqual(seatRequests, [
     "https://bookingapi.landmarkcinemas.com/api/Seating/GetSessionSeatData/200/11567088",
   ]);
@@ -529,4 +549,12 @@ function showtimePage(movies: LandmarkMovie[]): string {
         }
       };
     </script>`;
+}
+
+function seatFixture(id: string, column: number, status: number) {
+  return {
+    Id: id,
+    Position: { AreaNumber: 1, ColumnIndex: column, RowIndex: 0 },
+    Status: status,
+  };
 }

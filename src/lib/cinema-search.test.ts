@@ -147,7 +147,8 @@ function makeResult(): SearchResult {
       providerShowtimeId: "11567088",
       purchaseUrl:
         "https://www.landmarkcinemas.com/booking?cinemaId=200&filmId=1&externalSessionId=2&sessionId=11567088",
-      seatPreviewUrl: "/landmark-seat-preview?cinemaId=200",
+      seatPreviewUrl:
+        "https://www.landmarkcinemas.com/booking?cinemaId=200&filmId=1&externalSessionId=2&sessionId=11567088",
       startsAt: "2026-09-01T23:30:00.000Z",
       theatreId: "landmark-200",
     },
