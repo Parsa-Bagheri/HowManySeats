@@ -36,6 +36,7 @@ import {
 import {
   filterAndSortSearchResults,
   matchesCandidateFilters,
+  shouldShowSeatFailureWarning,
 } from "@/lib/client-search-results";
 import {
   addDays,
@@ -375,8 +376,11 @@ export default function HomePageClient({
               buildSearchWarning(
                 unavailableProviders.current,
                 hadDiscoveryFailures.current,
-                eligibleCandidates.some((candidate) =>
-                  failedSeatIds.current.has(candidate.showtime.id),
+                shouldShowSeatFailureWarning(
+                  eligibleCandidates.filter((candidate) =>
+                    failedSeatIds.current.has(candidate.showtime.id),
+                  ).length,
+                  eligibleCandidates.length,
                 ),
               ),
             );
@@ -435,8 +439,11 @@ export default function HomePageClient({
               buildSearchWarning(
                 unavailableProviders.current,
                 hadDiscoveryFailures.current,
-                eligibleCandidates.some((candidate) =>
-                  failedSeatIds.current.has(candidate.showtime.id),
+                shouldShowSeatFailureWarning(
+                  eligibleCandidates.filter((candidate) =>
+                    failedSeatIds.current.has(candidate.showtime.id),
+                  ).length,
+                  eligibleCandidates.length,
                 ),
               ),
             );

@@ -4,6 +4,7 @@ import {
   filterAndSortSearchResults,
   matchesCandidateFilters,
   matchesSeatFilters,
+  shouldShowSeatFailureWarning,
 } from "./client-search-results";
 import { makeDefaultSearchState } from "./search-state";
 import type { SearchResult } from "./types";
@@ -185,6 +186,15 @@ test("does not apply the two-hour filter to a multi-day search", () => {
     ),
     true,
   );
+});
+
+test("warns only when seat failures materially affect the result set", () => {
+  assert.equal(shouldShowSeatFailureWarning(0, 270), false);
+  assert.equal(shouldShowSeatFailureWarning(1, 270), false);
+  assert.equal(shouldShowSeatFailureWarning(4, 100), false);
+  assert.equal(shouldShowSeatFailureWarning(5, 100), true);
+  assert.equal(shouldShowSeatFailureWarning(1, 5), false);
+  assert.equal(shouldShowSeatFailureWarning(2, 20), true);
 });
 
 function makeResult(

@@ -11,6 +11,10 @@ import type {
   SortOption,
 } from "./types";
 
+const MIN_SIGNIFICANT_SEAT_FAILURES = 5;
+const MIN_SEAT_FAILURES_FOR_WARNING = 2;
+const SIGNIFICANT_SEAT_FAILURE_RATIO = 0.1;
+
 export function filterAndSortSearchResults(
   results: readonly SearchResult[],
   state: SearchState,
@@ -82,6 +86,23 @@ export function matchesSeatFilters(
     (!filters.onlyZeroSold || result.snapshot.occupiedEstimate === 0) &&
     (!filters.maxFiveSold || result.snapshot.occupiedEstimate <= 5) &&
     (!filters.accessibleAvailable || openAccessibleSeats > 0)
+  );
+}
+
+export function shouldShowSeatFailureWarning(
+  failedCount: number,
+  totalCount: number,
+): boolean {
+  if (
+    failedCount < MIN_SEAT_FAILURES_FOR_WARNING ||
+    totalCount <= 0
+  ) {
+    return false;
+  }
+
+  return (
+    failedCount >= MIN_SIGNIFICANT_SEAT_FAILURES ||
+    failedCount / totalCount >= SIGNIFICANT_SEAT_FAILURE_RATIO
   );
 }
 
