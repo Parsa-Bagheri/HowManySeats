@@ -162,6 +162,7 @@ const THEME_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const FUN_RESULT_BATCH_SIZE = 12;
 const SEAT_HYDRATION_BATCH_SIZE = 40;
+const SEAT_HYDRATION_BATCH_CONCURRENCY = 3;
 const LANDMARK_SEAT_CHECK_CONCURRENCY = 6;
 
 const funInputClass =
@@ -388,78 +389,104 @@ export default function HomePageClient({
           }
 
           setLoading(true);
+          const batchCount = Math.ceil(
+            missingCandidates.length / SEAT_HYDRATION_BATCH_SIZE,
+          );
+          const requestHydrationSignature = getHydrationSignature(
+            request.state,
+          );
+          let nextOffset = 0;
+          let checkedMissingCandidates = 0;
 
-          for (
-            let offset = 0;
-            offset < missingCandidates.length;
-            offset += SEAT_HYDRATION_BATCH_SIZE
-          ) {
-            const batch = missingCandidates.slice(
-              offset,
-              offset + SEAT_HYDRATION_BATCH_SIZE,
-            );
-            const loaded = await loadSeatSnapshotBatch(
-              batch,
-              controller.signal,
-            );
-
-            if (
-              controller.signal.aborted ||
-              request.searchId !== activeSearchId.current
-            ) {
-              break;
-            }
-
-            const loadedIds = new Set(
-              loaded.results.map((result) => result.showtime.id),
-            );
-
-            for (const candidate of batch) {
-              if (loadedIds.has(candidate.showtime.id)) {
-                failedSeatIds.current.delete(candidate.showtime.id);
-              } else if (loaded.hadFailures) {
-                failedSeatIds.current.add(candidate.showtime.id);
-              }
-            }
-
-            for (const result of loaded.results) {
-              attemptedSeatIds.current.add(result.showtime.id);
-              snapshotResults.current.set(result.showtime.id, result);
-            }
-
-            setLoadedResults(Array.from(snapshotResults.current.values()));
-            setSearchProgress({
-              checked: Math.min(
-                previouslyChecked + offset + batch.length,
-                eligibleCandidates.length,
-              ),
-              total: eligibleCandidates.length,
-            });
-            setWarning(
-              buildSearchWarning(
-                unavailableProviders.current,
-                hadDiscoveryFailures.current,
-                shouldShowSeatFailureWarning(
-                  eligibleCandidates.filter((candidate) =>
-                    failedSeatIds.current.has(candidate.showtime.id),
-                  ).length,
-                  eligibleCandidates.length,
-                ),
-              ),
-            );
-
+          const shouldStopHydration = () => {
             const queuedHydration = pendingHydration.current as
               | PendingHydration
               | undefined;
 
-            if (
-              queuedHydration &&
-              getHydrationSignature(queuedHydration.state) !==
-                getHydrationSignature(request.state)
-            ) {
-              break;
+            return (
+              controller.signal.aborted ||
+              request.searchId !== activeSearchId.current ||
+              Boolean(
+                queuedHydration &&
+                  getHydrationSignature(queuedHydration.state) !==
+                    requestHydrationSignature,
+              )
+            );
+          };
+
+          const hydrateBatchWorker = async () => {
+            while (nextOffset < missingCandidates.length) {
+              if (shouldStopHydration()) {
+                return;
+              }
+
+              const offset = nextOffset;
+              nextOffset += SEAT_HYDRATION_BATCH_SIZE;
+              const batch = missingCandidates.slice(
+                offset,
+                offset + SEAT_HYDRATION_BATCH_SIZE,
+              );
+              const loaded = await loadSeatSnapshotBatch(
+                batch,
+                controller.signal,
+              );
+
+              if (shouldStopHydration()) {
+                return;
+              }
+
+              const loadedIds = new Set(
+                loaded.results.map((result) => result.showtime.id),
+              );
+
+              for (const candidate of batch) {
+                if (loadedIds.has(candidate.showtime.id)) {
+                  failedSeatIds.current.delete(candidate.showtime.id);
+                } else if (loaded.hadFailures) {
+                  failedSeatIds.current.add(candidate.showtime.id);
+                }
+              }
+
+              for (const result of loaded.results) {
+                attemptedSeatIds.current.add(result.showtime.id);
+                snapshotResults.current.set(result.showtime.id, result);
+              }
+
+              checkedMissingCandidates += batch.length;
+              setLoadedResults(Array.from(snapshotResults.current.values()));
+              setSearchProgress({
+                checked: Math.min(
+                  previouslyChecked + checkedMissingCandidates,
+                  eligibleCandidates.length,
+                ),
+                total: eligibleCandidates.length,
+              });
+              setWarning(
+                buildSearchWarning(
+                  unavailableProviders.current,
+                  hadDiscoveryFailures.current,
+                  shouldShowSeatFailureWarning(
+                    eligibleCandidates.filter((candidate) =>
+                      failedSeatIds.current.has(candidate.showtime.id),
+                    ).length,
+                    eligibleCandidates.length,
+                  ),
+                ),
+              );
             }
-          }
+          };
+
+          await Promise.all(
+            Array.from(
+              {
+                length: Math.min(
+                  SEAT_HYDRATION_BATCH_CONCURRENCY,
+                  batchCount,
+                ),
+              },
+              () => hydrateBatchWorker(),
+            ),
+          );
         }
       } finally {
         hydrationRunning.current = false;
