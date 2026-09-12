@@ -4,6 +4,9 @@ import {
   filterAndSortSearchResults,
   matchesCandidateFilters,
   matchesSeatFilters,
+  SEARCH_RESULT_PAGE_SIZE,
+  selectSearchCandidatesForHydration,
+  shouldShowSeatFailureWarning,
 } from "./client-search-results";
 import { makeDefaultSearchState } from "./search-state";
 import type { SearchResult } from "./types";
@@ -187,10 +190,157 @@ test("does not apply the two-hour filter to a multi-day search", () => {
   );
 });
 
+test("warns at five failures for large result sets", () => {
+  assert.equal(shouldShowSeatFailureWarning(0, 270), false);
+  assert.equal(shouldShowSeatFailureWarning(4, 100), false);
+  assert.equal(shouldShowSeatFailureWarning(5, 100), true);
+  assert.equal(shouldShowSeatFailureWarning(4, 11), false);
+});
+
+test("warns at a thirty percent failure rate for ten or fewer results", () => {
+  assert.equal(shouldShowSeatFailureWarning(2, 10), false);
+  assert.equal(shouldShowSeatFailureWarning(3, 10), true);
+  assert.equal(shouldShowSeatFailureWarning(1, 4), false);
+  assert.equal(shouldShowSeatFailureWarning(1, 3), true);
+});
+
+test("authorizes at most the 500 closest candidates for initial hydration", () => {
+  const state = {
+    ...makeDefaultSearchState(TODAY),
+    date: TODAY,
+    endDate: TODAY,
+    sortBy: "distance-asc" as const,
+  };
+  const candidates = Array.from(
+    { length: SEARCH_RESULT_PAGE_SIZE + 3 },
+    (_, index) =>
+      makeResult({
+        distanceKm: SEARCH_RESULT_PAGE_SIZE + 3 - index,
+        id: `candidate-${index}`,
+      }),
+  );
+  const selection = selectSearchCandidatesForHydration(
+    candidates,
+    state,
+    new Set(),
+    SEARCH_RESULT_PAGE_SIZE,
+    NOW,
+    TODAY,
+  );
+
+  assert.equal(selection.newlyAuthorizedCandidates.length, 500);
+  assert.equal(selection.remainingCount, 3);
+  assert.equal(
+    selection.authorizedCandidates[0]?.showtime.id,
+    "candidate-502",
+  );
+  assert.equal(
+    selection.authorizedCandidates.at(-1)?.showtime.id,
+    "candidate-3",
+  );
+
+  const authorizedIds = new Set(
+    selection.newlyAuthorizedCandidates.map(
+      (candidate) => candidate.showtime.id,
+    ),
+  );
+  const nextSelection = selectSearchCandidatesForHydration(
+    candidates,
+    state,
+    authorizedIds,
+    SEARCH_RESULT_PAGE_SIZE * 2,
+    NOW,
+    TODAY,
+  );
+
+  assert.equal(nextSelection.newlyAuthorizedCandidates.length, 3);
+  assert.equal(nextSelection.authorizedCandidates.length, 503);
+  assert.equal(nextSelection.remainingCount, 0);
+});
+
+test("applies the selected showtime order before authorizing a page", () => {
+  const state = {
+    ...makeDefaultSearchState(TODAY),
+    date: TODAY,
+    endDate: TODAY,
+    sortBy: "time-asc" as const,
+  };
+  const candidates = [
+    makeResult({ id: "latest", startsAt: "2026-09-04T21:00:00.000Z" }),
+    makeResult({ id: "earliest", startsAt: "2026-09-04T19:00:00.000Z" }),
+    makeResult({ id: "middle", startsAt: "2026-09-04T20:00:00.000Z" }),
+  ];
+  const selection = selectSearchCandidatesForHydration(
+    candidates,
+    state,
+    new Set(),
+    2,
+    NOW,
+    TODAY,
+  );
+
+  assert.deepEqual(
+    selection.authorizedCandidates.map((candidate) => candidate.showtime.id),
+    ["earliest", "middle"],
+  );
+  assert.equal(selection.remainingCount, 1);
+});
+
+test("filter and sort changes preserve the page budget until Show more", () => {
+  const state = {
+    ...makeDefaultSearchState(TODAY),
+    date: TODAY,
+    endDate: TODAY,
+  };
+  const candidates = Array.from({ length: 1_100 }, (_, index) =>
+    makeResult({
+      id: `candidate-${index}`,
+      distanceKm: index + 1,
+      movieTitle: index < 500 ? "First Movie" : "Second Movie",
+    }),
+  );
+  const initial = selectSearchCandidatesForHydration(
+    candidates, state, new Set(), SEARCH_RESULT_PAGE_SIZE, NOW, TODAY,
+  );
+  // Authorization includes failed and not-yet-finished checks, not just results.
+  const authorizedIds = new Set(
+    initial.newlyAuthorizedCandidates.map((candidate) => candidate.showtime.id),
+  );
+  const changedState = {
+    ...state,
+    movieTitle: "Second Movie",
+    sortBy: "distance-desc" as const,
+  };
+  const filtered = selectSearchCandidatesForHydration(
+    candidates, changedState, authorizedIds, SEARCH_RESULT_PAGE_SIZE, NOW, TODAY,
+  );
+  assert.equal(filtered.authorizedCandidates.length, 0);
+  assert.equal(filtered.newlyAuthorizedCandidates.length, 0);
+  assert.equal(filtered.remainingCount, 600);
+
+  const nextPage = selectSearchCandidatesForHydration(
+    candidates, changedState, authorizedIds, SEARCH_RESULT_PAGE_SIZE * 2, NOW, TODAY,
+  );
+  assert.equal(nextPage.newlyAuthorizedCandidates.length, 500);
+  assert.equal(nextPage.authorizedCandidates[0]?.showtime.id, "candidate-1099");
+  assert.equal(nextPage.authorizedCandidates.at(-1)?.showtime.id, "candidate-600");
+  assert.equal(nextPage.remainingCount, 100);
+  for (const candidate of nextPage.newlyAuthorizedCandidates) {
+    authorizedIds.add(candidate.showtime.id);
+  }
+  const cleared = selectSearchCandidatesForHydration(
+    candidates, state, authorizedIds, SEARCH_RESULT_PAGE_SIZE * 2, NOW, TODAY,
+  );
+  assert.equal(cleared.authorizedCandidates.length, 1_000);
+  assert.equal(cleared.newlyAuthorizedCandidates.length, 0);
+  assert.equal(cleared.remainingCount, 100);
+});
+
 function makeResult(
   overrides: {
     accessibleSeats?: number;
     companionSeats?: number;
+    distanceKm?: number;
     format?: string;
     id?: string;
     movieTitle?: string;
@@ -203,7 +353,7 @@ function makeResult(
   const id = overrides.id ?? "example";
 
   return {
-    distanceKm: id === "later" ? 2 : 1,
+    distanceKm: overrides.distanceKm ?? (id === "later" ? 2 : 1),
     showtime: {
       format: overrides.format ?? "Regular",
       id,
