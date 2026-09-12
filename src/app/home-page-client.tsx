@@ -2019,13 +2019,28 @@ function CleanResultCard({ result }: { result: SearchResult }) {
 
   return (
     <article className="result-card rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_14px_44px_rgba(0,0,0,0.28)]">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-800 pb-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-white">
             {theatreHeading(result.theatre)}
           </h2>
-          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">
-            {providerLabel}
+          <p className="mt-1 font-semibold text-neutral-100">
+            {result.showtime.movieTitle}
+          </p>
+          <p className="mt-2 flex items-center gap-2 font-semibold text-neutral-100">
+            <Clock className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+            {startsAt.toLocaleDateString([], {
+              ...timeZoneOptions,
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+            })}{" "}
+            at{" "}
+            {startsAt.toLocaleTimeString([], {
+              ...timeZoneOptions,
+              hour: "numeric",
+              minute: "2-digit",
+            })}
           </p>
           <p className="mt-1 flex items-center gap-1 text-sm text-neutral-400">
             <MapPin className="h-4 w-4 text-amber-300" aria-hidden="true" />
@@ -2067,23 +2082,7 @@ function CleanResultCard({ result }: { result: SearchResult }) {
 
       <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto]">
         <div>
-          <p className="flex items-center gap-2 font-semibold text-neutral-100">
-            <Clock className="h-4 w-4 text-emerald-300" aria-hidden="true" />
-            {result.showtime.movieTitle}{" - "}
-            {startsAt.toLocaleDateString([], {
-              ...timeZoneOptions,
-              weekday: "short",
-              month: "short",
-              day: "numeric",
-            })}{" "}
-            at{" "}
-            {startsAt.toLocaleTimeString([], {
-              ...timeZoneOptions,
-              hour: "numeric",
-              minute: "2-digit",
-            })}{" "}
-          </p>
-          <p className="mt-1 text-sm text-neutral-400">
+          <p className="text-sm text-neutral-400">
             {[result.showtime.format, result.showtime.auditorium]
               .filter(Boolean)
               .join(" - ")}
@@ -2224,13 +2223,31 @@ function FunResultCard({ result }: { result: SearchResult }) {
     <article
       className={`result-card chaos-card relative border-[6px] border-black bg-white ${funCardShadow}`}
     >
-      <div className="chaos-card-head grid gap-3 border-b-[6px] border-black p-4 lg:grid-cols-[1fr_auto]">
+      <div className="chaos-card-head grid gap-3 p-4 lg:grid-cols-[1fr_auto]">
         <div className="min-w-0">
-          <h2 className="text-[clamp(1.75rem,4vw,2.6rem)] font-black uppercase leading-none text-black">
+          <h2 className="text-[clamp(1.5rem,3.5vw,2.25rem)] font-black uppercase leading-none text-black">
             {theatreHeading(result.theatre)}
           </h2>
-          <p className="mt-2 text-xs font-black uppercase tracking-[0.16em]">
-            {providerLabel}
+          <p className="mt-2 text-lg font-black uppercase leading-tight">
+            {result.showtime.movieTitle}
+          </p>
+          <p className="mt-2 flex flex-wrap items-center gap-2 text-lg font-black uppercase leading-tight">
+            <Clock className="h-5 w-5 text-[#00a651]" aria-hidden="true" />
+            <span>
+              {startsAt.toLocaleDateString([], {
+                ...timeZoneOptions,
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+            <span>
+              {startsAt.toLocaleTimeString([], {
+                ...timeZoneOptions,
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </span>
           </p>
           <p className="mt-2 flex flex-wrap items-center gap-2 text-sm font-black uppercase">
             <MapPin className="h-4 w-4 text-[#ff4fa3]" aria-hidden="true" />
@@ -2275,28 +2292,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="grid content-start gap-4 bg-[#fff8df] p-4">
           <div>
-            <p className="text-xl font-black uppercase leading-tight">
-              {result.showtime.movieTitle}
-            </p>
-            <p className="flex flex-wrap items-center gap-2 text-xl font-black uppercase leading-tight">
-              <Clock className="h-5 w-5 text-[#00a651]" aria-hidden="true" />
-              <span>
-                {startsAt.toLocaleDateString([], {
-                  ...timeZoneOptions,
-                  weekday: "short",
-                  month: "short",
-                  day: "numeric",
-                })}
-              </span>
-              <span>
-                {startsAt.toLocaleTimeString([], {
-                  ...timeZoneOptions,
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-              </span>
-            </p>
-            <p className="mt-2 text-sm font-black uppercase text-zinc-700">
+            <p className="text-sm font-black uppercase text-zinc-700">
               {[result.showtime.format, result.showtime.auditorium]
                 .filter(Boolean)
                 .join(" / ")}
