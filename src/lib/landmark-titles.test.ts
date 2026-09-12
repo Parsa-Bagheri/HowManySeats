@@ -97,6 +97,23 @@ test("uses either Name or Description as session experience metadata", () => {
   );
 });
 
+test("matches trademarked format names before Unicode compatibility normalization", () => {
+  for (const format of ["IMAX™", "IMAX®", "ＩＭＡＸ™"]) {
+    assert.equal(
+      normalizeLandmarkMovieTitle(`Odyssey, The - ${format} Experience`, ["IMAX"]),
+      "The Odyssey",
+    );
+    assert.equal(
+      normalizeLandmarkMovieTitle("Odyssey, The - IMAX Experience", [{ Name: format }]),
+      "The Odyssey",
+    );
+  }
+  assert.equal(
+    normalizeLandmarkMovieTitle("A Film - IMAX™ with Laser Experience", ["IMAX"]),
+    "A Film - IMAX™ with Laser Experience",
+  );
+});
+
 test("requires exact corroboration and preserves nonmatching suffixes", () => {
   const title = "Odyssey, The - IMAX Experience";
 

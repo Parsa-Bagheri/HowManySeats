@@ -173,8 +173,8 @@ function getExperienceLabels(
 
 function normalizeFormatIdentity(value: string): string | undefined {
   let normalized = value
-    .normalize("NFKC")
     .replace(/[®™]/g, "")
+    .normalize("NFKC")
     .toLowerCase()
     .replace(/[‐‑‒–—−]/g, "-")
     .replace(/\s+/g, " ")

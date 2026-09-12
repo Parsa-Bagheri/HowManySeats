@@ -1179,7 +1179,7 @@ function CleanHomeView(props: SearchViewProps) {
                 aria-live="polite"
               >
                 {remainingSearchResults > 0
-                  ? "No matches in the first 500 showtimes. Show more to check the next results."
+                  ? "No matches in the showtimes checked so far. Show more to check the next results."
                   : "No showtimes match your search. Clear a filter or choose another date."}
               </div>
             ) : null}
@@ -1374,7 +1374,7 @@ function FunHomeView(props: SearchViewProps) {
                 aria-live="polite"
               >
                 {remainingSearchResults > 0
-                  ? "No matches in the first 500 showtimes. Show more to check the next results."
+                  ? "No matches in the showtimes checked so far. Show more to check the next results."
                   : "No showtimes match your search. Clear a filter or choose another date."}
               </div>
             ) : null}

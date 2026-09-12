@@ -286,6 +286,56 @@ test("applies the selected showtime order before authorizing a page", () => {
   assert.equal(selection.remainingCount, 1);
 });
 
+test("filter and sort changes preserve the page budget until Show more", () => {
+  const state = {
+    ...makeDefaultSearchState(TODAY),
+    date: TODAY,
+    endDate: TODAY,
+  };
+  const candidates = Array.from({ length: 1_100 }, (_, index) =>
+    makeResult({
+      id: `candidate-${index}`,
+      distanceKm: index + 1,
+      movieTitle: index < 500 ? "First Movie" : "Second Movie",
+    }),
+  );
+  const initial = selectSearchCandidatesForHydration(
+    candidates, state, new Set(), SEARCH_RESULT_PAGE_SIZE, NOW, TODAY,
+  );
+  // Authorization includes failed and not-yet-finished checks, not just results.
+  const authorizedIds = new Set(
+    initial.newlyAuthorizedCandidates.map((candidate) => candidate.showtime.id),
+  );
+  const changedState = {
+    ...state,
+    movieTitle: "Second Movie",
+    sortBy: "distance-desc" as const,
+  };
+  const filtered = selectSearchCandidatesForHydration(
+    candidates, changedState, authorizedIds, SEARCH_RESULT_PAGE_SIZE, NOW, TODAY,
+  );
+  assert.equal(filtered.authorizedCandidates.length, 0);
+  assert.equal(filtered.newlyAuthorizedCandidates.length, 0);
+  assert.equal(filtered.remainingCount, 600);
+
+  const nextPage = selectSearchCandidatesForHydration(
+    candidates, changedState, authorizedIds, SEARCH_RESULT_PAGE_SIZE * 2, NOW, TODAY,
+  );
+  assert.equal(nextPage.newlyAuthorizedCandidates.length, 500);
+  assert.equal(nextPage.authorizedCandidates[0]?.showtime.id, "candidate-1099");
+  assert.equal(nextPage.authorizedCandidates.at(-1)?.showtime.id, "candidate-600");
+  assert.equal(nextPage.remainingCount, 100);
+  for (const candidate of nextPage.newlyAuthorizedCandidates) {
+    authorizedIds.add(candidate.showtime.id);
+  }
+  const cleared = selectSearchCandidatesForHydration(
+    candidates, state, authorizedIds, SEARCH_RESULT_PAGE_SIZE * 2, NOW, TODAY,
+  );
+  assert.equal(cleared.authorizedCandidates.length, 1_000);
+  assert.equal(cleared.newlyAuthorizedCandidates.length, 0);
+  assert.equal(cleared.remainingCount, 100);
+});
+
 function makeResult(
   overrides: {
     accessibleSeats?: number;
