@@ -188,13 +188,18 @@ test("does not apply the two-hour filter to a multi-day search", () => {
   );
 });
 
-test("warns only when seat failures materially affect the result set", () => {
+test("warns at five failures for large result sets", () => {
   assert.equal(shouldShowSeatFailureWarning(0, 270), false);
-  assert.equal(shouldShowSeatFailureWarning(1, 270), false);
   assert.equal(shouldShowSeatFailureWarning(4, 100), false);
   assert.equal(shouldShowSeatFailureWarning(5, 100), true);
-  assert.equal(shouldShowSeatFailureWarning(1, 5), false);
-  assert.equal(shouldShowSeatFailureWarning(2, 20), true);
+  assert.equal(shouldShowSeatFailureWarning(4, 11), false);
+});
+
+test("warns at a thirty percent failure rate for ten or fewer results", () => {
+  assert.equal(shouldShowSeatFailureWarning(2, 10), false);
+  assert.equal(shouldShowSeatFailureWarning(3, 10), true);
+  assert.equal(shouldShowSeatFailureWarning(1, 4), false);
+  assert.equal(shouldShowSeatFailureWarning(1, 3), true);
 });
 
 function makeResult(

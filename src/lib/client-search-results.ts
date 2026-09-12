@@ -12,8 +12,8 @@ import type {
 } from "./types";
 
 const MIN_SIGNIFICANT_SEAT_FAILURES = 5;
-const MIN_SEAT_FAILURES_FOR_WARNING = 2;
-const SIGNIFICANT_SEAT_FAILURE_RATIO = 0.1;
+const SMALL_RESULT_SET_MAX = 10;
+const SMALL_RESULT_SET_FAILURE_RATIO = 0.3;
 
 export function filterAndSortSearchResults(
   results: readonly SearchResult[],
@@ -93,17 +93,15 @@ export function shouldShowSeatFailureWarning(
   failedCount: number,
   totalCount: number,
 ): boolean {
-  if (
-    failedCount < MIN_SEAT_FAILURES_FOR_WARNING ||
-    totalCount <= 0
-  ) {
+  if (failedCount <= 0 || totalCount <= 0) {
     return false;
   }
 
-  return (
-    failedCount >= MIN_SIGNIFICANT_SEAT_FAILURES ||
-    failedCount / totalCount >= SIGNIFICANT_SEAT_FAILURE_RATIO
-  );
+  if (totalCount <= SMALL_RESULT_SET_MAX) {
+    return failedCount / totalCount >= SMALL_RESULT_SET_FAILURE_RATIO;
+  }
+
+  return failedCount >= MIN_SIGNIFICANT_SEAT_FAILURES;
 }
 
 export function sortSearchResults(
