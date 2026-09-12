@@ -225,6 +225,78 @@ test("maps Landmark sessions, formats, ticket links, and preview links", async (
   );
 });
 
+test("normalizes Landmark catalog titles per session without changing showtime identity", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const apiOrigin = "https://title-movie-api.landmark.test";
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (input) => {
+    if (String(input) !== `${apiOrigin}/movies/22/200`) {
+      throw new Error(`Unexpected request: ${String(input)}`);
+    }
+
+    return Response.json([
+      {
+        FilmId: 126642,
+        Sessions: [
+          {
+            NewDate: "2026-09-01",
+            Times: [
+              {
+                CinemaId: 200,
+                Experience: [{ Name: "IMAX" }],
+                ExternalSessionId: "181815",
+                Scheduleid: "11567088",
+                StartTime: "7:30 PM",
+              },
+              {
+                CinemaId: 200,
+                Experience: [{ Name: "3D" }],
+                ExternalSessionId: "181816",
+                Scheduleid: "11567089",
+                StartTime: "9:30 PM",
+              },
+            ],
+          },
+        ],
+        Title: "Odyssey, The - IMAX Experience",
+      },
+    ]);
+  };
+
+  const showtimes = await new LandmarkClient(apiOrigin).getShowtimes(
+    waterloo,
+    "2026-09-01",
+  );
+
+  assert.deepEqual(
+    showtimes.map(({ id, movieTitle, providerShowtimeId, purchaseUrl }) => ({
+      id,
+      movieTitle,
+      providerShowtimeId,
+      purchaseUrl,
+    })),
+    [
+      {
+        id: "landmark-200-11567088",
+        movieTitle: "The Odyssey",
+        providerShowtimeId: "11567088",
+        purchaseUrl:
+          "https://www.landmarkcinemas.com/booking?cinemaId=200&filmId=126642&externalSessionId=181815&sessionId=11567088",
+      },
+      {
+        id: "landmark-200-11567089",
+        movieTitle: "The Odyssey - IMAX Experience",
+        providerShowtimeId: "11567089",
+        purchaseUrl:
+          "https://www.landmarkcinemas.com/booking?cinemaId=200&filmId=126642&externalSessionId=181816&sessionId=11567089",
+      },
+    ],
+  );
+});
+
 test("does not truncate Landmark showtime candidates at 40", async (t) => {
   const originalFetch = globalThis.fetch;
   const apiOrigin = "https://uncapped-movie-api.landmark.test";

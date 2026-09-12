@@ -2021,12 +2021,12 @@ function CleanResultCard({ result }: { result: SearchResult }) {
     <article className="result-card rounded-lg border border-neutral-800 bg-[#111111] p-4 shadow-[0_14px_44px_rgba(0,0,0,0.28)]">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-800 pb-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">
+          <h2 className="text-lg font-semibold text-white">
+            {theatreHeading(result.theatre)}
+          </h2>
+          <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">
             {providerLabel}
           </p>
-          <h2 className="text-lg font-semibold text-white">
-            {result.theatre.name}
-          </h2>
           <p className="mt-1 flex items-center gap-1 text-sm text-neutral-400">
             <MapPin className="h-4 w-4 text-amber-300" aria-hidden="true" />
             {result.theatre.city}, {result.theatre.province}
@@ -2069,6 +2069,7 @@ function CleanResultCard({ result }: { result: SearchResult }) {
         <div>
           <p className="flex items-center gap-2 font-semibold text-neutral-100">
             <Clock className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+            {result.showtime.movieTitle}{" - "}
             {startsAt.toLocaleDateString([], {
               ...timeZoneOptions,
               weekday: "short",
@@ -2081,7 +2082,6 @@ function CleanResultCard({ result }: { result: SearchResult }) {
               hour: "numeric",
               minute: "2-digit",
             })}{" "}
-            - {result.showtime.movieTitle}
           </p>
           <p className="mt-1 text-sm text-neutral-400">
             {[result.showtime.format, result.showtime.auditorium]
@@ -2226,12 +2226,12 @@ function FunResultCard({ result }: { result: SearchResult }) {
     >
       <div className="chaos-card-head grid gap-3 border-b-[6px] border-black p-4 lg:grid-cols-[1fr_auto]">
         <div className="min-w-0">
-          <p className="mb-2 text-xs font-black uppercase tracking-[0.16em]">
+          <h2 className="text-[clamp(1.75rem,4vw,2.6rem)] font-black uppercase leading-none text-black">
+            {theatreHeading(result.theatre)}
+          </h2>
+          <p className="mt-2 text-xs font-black uppercase tracking-[0.16em]">
             {providerLabel}
           </p>
-          <h2 className="text-[clamp(1.75rem,4vw,2.6rem)] font-black uppercase leading-none text-black">
-            {result.theatre.name}
-          </h2>
           <p className="mt-2 flex flex-wrap items-center gap-2 text-sm font-black uppercase">
             <MapPin className="h-4 w-4 text-[#ff4fa3]" aria-hidden="true" />
             <span>
@@ -2275,6 +2275,9 @@ function FunResultCard({ result }: { result: SearchResult }) {
       <div className="grid lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="grid content-start gap-4 bg-[#fff8df] p-4">
           <div>
+            <p className="text-xl font-black uppercase leading-tight">
+              {result.showtime.movieTitle}
+            </p>
             <p className="flex flex-wrap items-center gap-2 text-xl font-black uppercase leading-tight">
               <Clock className="h-5 w-5 text-[#00a651]" aria-hidden="true" />
               <span>
@@ -2292,7 +2295,6 @@ function FunResultCard({ result }: { result: SearchResult }) {
                   minute: "2-digit",
                 })}
               </span>
-              <span>{result.showtime.movieTitle}</span>
             </p>
             <p className="mt-2 text-sm font-black uppercase text-zinc-700">
               {[result.showtime.format, result.showtime.auditorium]
@@ -2410,7 +2412,20 @@ function isFilterChecked(
 }
 
 function cinemaProviderLabel(provider: CinemaProvider): string {
-  return provider === "landmark" ? "Landmark Cinemas" : "Cineplex";
+  return provider === "landmark" ? "Landmark" : "Cineplex";
+}
+
+function theatreHeading(theatre: Theatre): string {
+  const name = theatre.name.trim();
+
+  if (
+    theatre.provider !== "landmark" ||
+    /^Landmark Cinemas\b/i.test(name)
+  ) {
+    return name;
+  }
+
+  return `Landmark Cinemas ${name}`;
 }
 
 function theatreTimeZoneOptions(

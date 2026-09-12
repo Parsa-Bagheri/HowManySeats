@@ -11,6 +11,7 @@ import {
   LANDMARK_THEATRES,
   type LandmarkTheatre,
 } from "./landmark-theatres";
+import { normalizeLandmarkMovieTitle } from "./landmark-titles";
 import { localDateTimeToIso } from "./showtime-time";
 import type {
   MovieSuggestion,
@@ -258,9 +259,9 @@ export class LandmarkClient {
 
     for (const movie of movies) {
       const filmId = toId(movie.FilmId);
-      const movieTitle = movie.Title?.trim();
+      const catalogTitle = movie.Title?.trim();
 
-      if (!filmId || !movieTitle) {
+      if (!filmId || !catalogTitle) {
         continue;
       }
 
@@ -270,6 +271,10 @@ export class LandmarkClient {
         }
 
         for (const time of session.Times ?? []) {
+          const movieTitle = normalizeLandmarkMovieTitle(
+            catalogTitle,
+            time.Experience,
+          );
           const cinemaId = toId(time.CinemaId);
           const externalSessionId = toId(time.ExternalSessionId);
           const sessionId = toId(time.Scheduleid);
@@ -281,6 +286,7 @@ export class LandmarkClient {
             cinemaId !== landmarkTheatre.providerTheatreId ||
             !externalSessionId ||
             !sessionId ||
+            !movieTitle ||
             !startsAt ||
             time.SoldOut ||
             time.SessionExpired
