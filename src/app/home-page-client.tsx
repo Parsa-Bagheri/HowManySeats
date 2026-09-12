@@ -35,7 +35,8 @@ import {
 } from "@/lib/browser-cinema-search";
 import {
   filterAndSortSearchResults,
-  matchesCandidateFilters,
+  SEARCH_RESULT_PAGE_SIZE,
+  selectSearchCandidatesForHydration,
   shouldShowSeatFailureWarning,
 } from "@/lib/client-search-results";
 import {
@@ -114,6 +115,8 @@ type SearchViewProps = {
   form: SearchFormProps;
   hasSearched: boolean;
   onDismissThemePrompt: () => void;
+  onLoadMoreResults: () => void;
+  remainingSearchResults: number;
   resultState: SearchState;
   results: SearchResult[];
   searchProgress: SearchProgress;
@@ -189,6 +192,7 @@ export default function HomePageClient({
     checked: 0,
     total: 0,
   });
+  const [remainingSearchResults, setRemainingSearchResults] = useState(0);
   const [error, setError] = useState<string | undefined>();
   const [warning, setWarning] = useState<string | undefined>();
   const [hasSearched, setHasSearched] = useState(false);
@@ -214,6 +218,8 @@ export default function HomePageClient({
   const unavailableProviders = useRef<CinemaProvider[]>([]);
   const hadDiscoveryFailures = useRef(false);
   const snapshotResults = useRef(new Map<string, SearchResult>());
+  const authorizedSeatIds = useRef(new Set<string>());
+  const seatAuthorizationLimit = useRef(SEARCH_RESULT_PAGE_SIZE);
   const attemptedSeatIds = useRef(new Set<string>());
   const failedSeatIds = useRef(new Set<string>());
   const lastHydrationSignature = useRef<string | undefined>(undefined);
@@ -352,15 +358,21 @@ export default function HomePageClient({
 
           const now = new Date();
           const localToday = getLocalDateInputValue();
-          const eligibleCandidates = discoveredCandidates.current.filter(
-            (candidate) =>
-              matchesCandidateFilters(
-                candidate,
-                request.state,
-                now,
-                localToday,
-              ),
+          const selection = selectSearchCandidatesForHydration(
+            discoveredCandidates.current,
+            request.state,
+            authorizedSeatIds.current,
+            seatAuthorizationLimit.current,
+            now,
+            localToday,
           );
+          const eligibleCandidates = selection.authorizedCandidates;
+
+          for (const candidate of selection.newlyAuthorizedCandidates) {
+            authorizedSeatIds.current.add(candidate.showtime.id);
+          }
+
+          setRemainingSearchResults(selection.remainingCount);
           const missingCandidates = eligibleCandidates.filter(
             (candidate) => !attemptedSeatIds.current.has(candidate.showtime.id),
           );
@@ -426,12 +438,20 @@ export default function HomePageClient({
                 offset,
                 offset + SEAT_HYDRATION_BATCH_SIZE,
               );
+
+              for (const candidate of batch) {
+                attemptedSeatIds.current.add(candidate.showtime.id);
+              }
+
               const loaded = await loadSeatSnapshotBatch(
                 batch,
                 controller.signal,
               );
 
-              if (shouldStopHydration()) {
+              if (
+                controller.signal.aborted ||
+                request.searchId !== activeSearchId.current
+              ) {
                 return;
               }
 
@@ -448,7 +468,6 @@ export default function HomePageClient({
               }
 
               for (const result of loaded.results) {
-                attemptedSeatIds.current.add(result.showtime.id);
                 snapshotResults.current.set(result.showtime.id, result);
               }
 
@@ -538,12 +557,15 @@ export default function HomePageClient({
     unavailableProviders.current = [];
     hadDiscoveryFailures.current = false;
     snapshotResults.current = new Map();
+    authorizedSeatIds.current = new Set();
+    seatAuthorizationLimit.current = SEARCH_RESULT_PAGE_SIZE;
     attemptedSeatIds.current = new Set();
     failedSeatIds.current = new Set();
     lastHydrationSignature.current = undefined;
     setLoading(true);
     setHasSearched(false);
     setSearchProgress({ checked: 0, total: 0 });
+    setRemainingSearchResults(0);
     setError(undefined);
     setWarning(undefined);
     setLoadedResults([]);
@@ -769,6 +791,24 @@ export default function HomePageClient({
     [executeSearch, searchState],
   );
 
+  const onLoadMoreResults = useCallback(() => {
+    if (
+      remainingSearchResults <= 0 ||
+      hydrationRunning.current ||
+      discoveryInFlight.current
+    ) {
+      return;
+    }
+
+    seatAuthorizationLimit.current += SEARCH_RESULT_PAGE_SIZE;
+    const state = getResultSearchState(
+      appliedSearchState.current,
+      latestSearchState.current,
+    );
+    lastHydrationSignature.current = getHydrationSignature(state);
+    void hydrateEligibleCandidates(state, activeSearchId.current);
+  }, [hydrateEligibleCandidates, remainingSearchResults]);
+
   const updateStartDate = useCallback((value: string) => {
     setSearchState((current) => {
       const nextEndDate = normalizeEndDate(value, current.endDate);
@@ -836,6 +876,8 @@ export default function HomePageClient({
     form,
     hasSearched,
     onDismissThemePrompt: dismissThemePrompt,
+    onLoadMoreResults,
+    remainingSearchResults,
     resultState,
     results,
     searchProgress,
@@ -1042,6 +1084,8 @@ function CleanHomeView(props: SearchViewProps) {
     error,
     form,
     hasSearched,
+    onLoadMoreResults,
+    remainingSearchResults,
     resultState,
     results,
     searchProgress,
@@ -1083,7 +1127,7 @@ function CleanHomeView(props: SearchViewProps) {
                 <div>
                   <p className="text-sm text-neutral-400">Results</p>
                   <p className="mt-1 text-3xl font-semibold text-white">
-                    {resultCount(results, loading)}
+                    {resultCount(results, loading, remainingSearchResults)}
                   </p>
                 </div>
                 <div className="text-right text-sm text-neutral-400">
@@ -1126,20 +1170,27 @@ function CleanHomeView(props: SearchViewProps) {
             ) : null}
 
             {!loading &&
-            hasSearched &&
-            !error &&
-            results.length === 0 ? (
+             hasSearched &&
+             !error &&
+             results.length === 0 ? (
               <div
                 className="rounded-lg border border-neutral-800 bg-[#111111] p-5 text-sm leading-6 text-neutral-300"
                 role="status"
                 aria-live="polite"
               >
-                No showtimes match your search. Clear a filter or choose another
-                date.
+                {remainingSearchResults > 0
+                  ? "No matches in the first 500 showtimes. Show more to check the next results."
+                  : "No showtimes match your search. Clear a filter or choose another date."}
               </div>
             ) : null}
 
             <CleanResultList results={results} />
+            <SearchResultLoadMoreButton
+              loading={loading}
+              mode="clean"
+              onClick={onLoadMoreResults}
+              remainingCount={remainingSearchResults}
+            />
           </section>
         </div>
       </div>
@@ -1157,6 +1208,8 @@ function FunHomeView(props: SearchViewProps) {
     error,
     form,
     hasSearched,
+    onLoadMoreResults,
+    remainingSearchResults,
     resultState,
     results,
     searchProgress,
@@ -1254,7 +1307,7 @@ function FunHomeView(props: SearchViewProps) {
                   <p
                     className={`mt-1 font-black leading-none ${loading ? "text-[clamp(2.5rem,4.5vw,4rem)]" : "text-[clamp(4rem,10vw,7rem)]"}`}
                   >
-                    {resultCount(results, loading)}
+                    {resultCount(results, loading, remainingSearchResults)}
                   </p>
                 </div>
                 <div className="grid gap-4 p-5 lg:pr-12">
@@ -1320,13 +1373,17 @@ function FunHomeView(props: SearchViewProps) {
                 role="status"
                 aria-live="polite"
               >
-                No showtimes match your search. Clear a filter or choose another
-                date.
+                {remainingSearchResults > 0
+                  ? "No matches in the first 500 showtimes. Show more to check the next results."
+                  : "No showtimes match your search. Clear a filter or choose another date."}
               </div>
             ) : null}
 
             <FunResultList
               key={results[0]?.snapshot.checkedAt ?? "no-results"}
+              loading={loading}
+              onLoadMoreResults={onLoadMoreResults}
+              remainingSearchResults={remainingSearchResults}
               results={results}
             />
           </section>
@@ -2163,6 +2220,34 @@ const CleanResultList = memo(function CleanResultList({
   );
 });
 
+function SearchResultLoadMoreButton({
+  loading,
+  mode,
+  onClick,
+  remainingCount,
+}: {
+  loading: boolean;
+  mode: UiMode;
+  onClick: () => void;
+  remainingCount: number;
+}) {
+  if (loading || remainingCount <= 0) {
+    return null;
+  }
+
+  const nextPageSize = Math.min(SEARCH_RESULT_PAGE_SIZE, remainingCount);
+  const className =
+    mode === "fun"
+      ? "focus-ring mx-auto inline-flex min-h-14 items-center justify-center border-[6px] border-black bg-[#f7e900] px-6 text-base font-black uppercase text-black shadow-[8px_8px_0_#111111] transition hover:bg-[#00e676]"
+      : "focus-ring mx-auto inline-flex min-h-11 items-center justify-center rounded-md border border-neutral-700 bg-neutral-900 px-5 text-sm font-semibold text-white transition hover:border-neutral-500 hover:bg-neutral-800";
+
+  return (
+    <button className={className} type="button" onClick={onClick}>
+      Show {nextPageSize} more result{nextPageSize === 1 ? "" : "s"}
+    </button>
+  );
+}
+
 function HeaderStat({
   accent,
   icon,
@@ -2378,8 +2463,14 @@ function FunResultCard({ result }: { result: SearchResult }) {
 }
 
 const FunResultList = memo(function FunResultList({
+  loading,
+  onLoadMoreResults,
+  remainingSearchResults,
   results,
 }: {
+  loading: boolean;
+  onLoadMoreResults: () => void;
+  remainingSearchResults: number;
   results: SearchResult[];
 }) {
   const [visibleCount, setVisibleCount] = useState(FUN_RESULT_BATCH_SIZE);
@@ -2405,7 +2496,14 @@ const FunResultList = memo(function FunResultList({
         >
           Show {Math.min(FUN_RESULT_BATCH_SIZE, remainingCount)} more results
         </button>
-      ) : null}
+      ) : (
+        <SearchResultLoadMoreButton
+          loading={loading}
+          mode="fun"
+          onClick={onLoadMoreResults}
+          remainingCount={remainingSearchResults}
+        />
+      )}
     </>
   );
 });
@@ -2471,12 +2569,13 @@ function sortLabel(sortBy: SortOption): string {
 function resultCount(
   results: SearchResult[],
   loading: boolean,
+  remainingCount: number,
 ): string {
   if (loading) {
     return "Searching";
   }
 
-  return String(results.length);
+  return `${results.length}${remainingCount > 0 ? "+" : ""}`;
 }
 
 function searchProgressTitle(progress: SearchProgress): string {
