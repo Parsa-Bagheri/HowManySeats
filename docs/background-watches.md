@@ -212,9 +212,19 @@ After that decision, the operator should:
 4. Invoke `action: probe` with a current real screening's numeric identifiers.
    This explicitly performs one read-only provider check from Lambda. Stop if
    Cineplex cannot be confirmed; do not enable repeated live polling.
-5. If access and costs remain approved, deploy with CDK context `enableLive=true`
-   and `enablePolling=true`. Run no more than three watches for 15 minutes, then
-   disable the schedule again. Verify real observation timestamps, queue age,
+5. If access and costs remain approved, choose the explicit screening targets
+   and pause unrelated fixture watches. Enabling CDK context `enablePolling=true`
+   also requires `enableLive=true` and `pollingEndDate`: a valid future ISO
+   timestamp no more than 15 minutes from synthesis. The recurring Scheduler
+   receives that enforced EndDate and stops new scheduled invocations by it.
+   For example, generate a fresh ten-minute UTC end with
+   `[DateTime]::UtcNow.AddMinutes(10).ToString('o')` and pass it as
+   `--context pollingEndDate=<timestamp>` alongside the selected region.
+   Deployment time consumes part of this window; regenerate the end before a
+   new approved run. Pending queue deliveries/retries can still finish after
+   scheduled invocations stop; pause the watch to stop further collection.
+   Keep the default schedule disabled for manual invocation demos.
+   Verify real observation timestamps, queue age,
    retry behavior, the UI using `WATCH_BACKEND=aws`, and CloudWatch metrics.
    Configure the local Node server's `WATCH_TABLE`, queue/DLQ URLs and default
    AWS credentials using an appropriately scoped role/profile. This preparation
@@ -252,16 +262,15 @@ calculator for `ca-central-1` and account-specific availability before approval.
 
 | Workload | Planning estimate before credits |
 | --- | --- |
-| Three watches, 15 minutes, roughly 12 refreshes with mature 48 KB documents | $0.02–$0.05 incremental requests/compute/logs, assuming bounded retries and at most 100 Lambda invocations; plus prorated monitoring |
-| Three watches running continuously for 24 hours, 864 refreshes | About $0.35–$0.65/day at the conservative item envelope and function timeouts; excludes extra UI/read traffic and repeated infrastructure failures |
+| Three watches, 15 minutes, roughly 12 refreshes with mature 48 KB documents | $0.02â€“$0.05 incremental requests/compute/logs, assuming bounded retries and at most 100 Lambda invocations; plus prorated monitoring |
+| Three watches running continuously for 24 hours, 864 refreshes | About $0.35â€“$0.65/day at the conservative item envelope and function timeouts; excludes extra UI/read traffic and repeated infrastructure failures |
 | Stack left idle, schedule disabled, no metric publication | Up to $0.45/month for three alarms, plus small retained table/log/bootstrap storage |
 | A month with four custom metrics publishing regularly | Up to $1.40/month for metrics in addition to alarms/storage |
 
 The 48-hour watch expiry, global quotas and bounded concurrency reduce useful
 work, but do not cap arbitrary account costs or external traffic. Billing
 alerts can lag and are not a hard cap. Destroying the isolated demo after the
-15-minute run limits ongoing resources. No cloud resource or charge has been
-created by this implementation.
+15-minute run limits ongoing resources. The isolated Ohio deployment has now been verified; see [actual AWS results](aws-verification.md). Retained resources may consume credits.
 
 Sources checked October 13, 2026: [Free Tier FAQ](https://aws.amazon.com/free/free-tier-faqs/),
 [DynamoDB pricing/unit sizing](https://aws.amazon.com/dynamodb/pricing/),

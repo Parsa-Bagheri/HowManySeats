@@ -14,6 +14,7 @@
     "watch:ops": "node --import tsx scripts/watch-service.ts",
     "watch:verify": "node --import tsx scripts/watch-replay.ts",
     "infra:synth": "cdk synth --no-lookups --quiet",
+    "infra:test": "node --import tsx --test infra/polling-window.test.ts",
     "infra:verify": "node --import tsx scripts/verify-watch-infra.ts",
     "infra:diff": "cdk diff"
   },

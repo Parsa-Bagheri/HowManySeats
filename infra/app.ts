@@ -9,6 +9,7 @@ import { Alarm, ComparisonOperator, TreatMissingData, Unit } from "aws-cdk-lib/a
 import { PolicyStatement, Role, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { CfnSchedule } from "aws-cdk-lib/aws-scheduler";
 import { resolve } from "node:path";
+import { pollingWindow } from "./polling-window";
 
 const app = new App();
 const deploymentRegion = app.node.tryGetContext("deploymentRegion") ?? "ca-central-1";
@@ -17,6 +18,7 @@ const stack = new Stack(app, "HowManySeatsWatchDemo", { env: { region: deploymen
 const live = app.node.tryGetContext("enableLive") === "true";
 const polling = app.node.tryGetContext("enablePolling") === "true";
 if (polling && !live) throw new Error("Polling requires an explicitly verified live provider environment.");
+const pollingConfiguration = pollingWindow(polling, app.node.tryGetContext("pollingEndDate"));
 const table = new Table(stack, "WatchTable", { partitionKey: { name: "pk", type: AttributeType.STRING }, billingMode: BillingMode.PAY_PER_REQUEST, maxReadRequestUnits: 64, maxWriteRequestUnits: 256, timeToLiveAttribute: "expiresAt", removalPolicy: RemovalPolicy.DESTROY });
 const dlq = new Queue(stack, "RefreshDeadLetters", { retentionPeriod: Duration.days(7), encryption: undefined, removalPolicy: RemovalPolicy.DESTROY });
 const queue = new Queue(stack, "RefreshQueue", { visibilityTimeout: Duration.seconds(180), retentionPeriod: Duration.days(1), deadLetterQueue: { queue: dlq, maxReceiveCount: 8 }, removalPolicy: RemovalPolicy.DESTROY });
@@ -34,7 +36,7 @@ worker.addEventSource(new SqsEventSource(queue, { batchSize: 1, reportBatchItemF
 const scheduleRole = new Role(stack, "ScheduleRole", { assumedBy: new ServicePrincipal("scheduler.amazonaws.com") });
 scheduleRole.addToPolicy(new PolicyStatement({ actions: ["lambda:InvokeFunction"], resources: [dispatcher.functionArn] }));
 scheduleRole.addToPolicy(new PolicyStatement({ actions: ["sqs:SendMessage"], resources: [dlq.queueArn] }));
-const schedule = new CfnSchedule(stack, "RefreshSchedule", { scheduleExpression: "rate(5 minutes)", state: polling ? "ENABLED" : "DISABLED", flexibleTimeWindow: { mode: "OFF" }, target: { arn: dispatcher.functionArn, roleArn: scheduleRole.roleArn, retryPolicy: { maximumRetryAttempts: 1, maximumEventAgeInSeconds: 300 }, deadLetterConfig: { arn: dlq.queueArn } } });
+const schedule = new CfnSchedule(stack, "RefreshSchedule", { scheduleExpression: "rate(5 minutes)", ...pollingConfiguration, flexibleTimeWindow: { mode: "OFF" }, target: { arn: dispatcher.functionArn, roleArn: scheduleRole.roleArn, retryPolicy: { maximumRetryAttempts: 1, maximumEventAgeInSeconds: 300 }, deadLetterConfig: { arn: dlq.queueArn } } });
 const failures = new MetricFilter(stack, "RefreshFailuresMetric", { logGroup: worker.logGroup, filterPattern: FilterPattern.any(FilterPattern.stringValue("$.outcome", "=", "dead"), FilterPattern.stringValue("$.outcome", "=", "retry"), FilterPattern.stringValue("$.outcome", "=", "handler-error")), metricNamespace: "HowManySeats/Watches", metricName: "RefreshFailures", metricValue: "1" });
 new MetricFilter(stack, "RefreshSuccessesMetric", { logGroup: worker.logGroup, filterPattern: FilterPattern.stringValue("$.outcome", "=", "stored"), metricNamespace: "HowManySeats/Watches", metricName: "RefreshSuccesses", metricValue: "1" });
 for (const [name, field] of [["WorkerDurationMs", "durationMs"], ["ObservationAgeMs", "observationAgeMs"]]) new MetricFilter(stack, name, { logGroup: worker.logGroup, filterPattern: FilterPattern.numberValue(`$.${field}`, ">=", 0), metricNamespace: "HowManySeats/Watches", metricName: name, metricValue: `$.${field}`, unit: Unit.MILLISECONDS });
