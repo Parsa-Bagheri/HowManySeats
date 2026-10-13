@@ -5,6 +5,10 @@ import { buildSeatSnapshot } from "../src/lib/seat-scoring";
 import { WATCH_LIMITS, type Watch } from "../src/lib/watches/model";
 
 type Resource = { Type: string; Properties: Record<string, unknown> };
+const manifest = JSON.parse(await readFile("cdk.out/manifest.json", "utf8")) as { artifacts: Record<string, { environment?: string }> };
+const region = manifest.artifacts.HowManySeatsWatchDemo.environment?.split("/").at(-1);
+const expectedRegion = process.argv[2] ?? "ca-central-1";
+assert.equal(region, expectedRegion, "The synthesized stack must target the explicitly expected deployment region");
 const template = JSON.parse(await readFile("cdk.out/HowManySeatsWatchDemo.template.json", "utf8")) as { Resources: Record<string, Resource> };
 const resources = Object.values(template.Resources);
 const ofType = (type: string) => resources.filter((resource) => resource.Type === type);
@@ -30,5 +34,6 @@ const watch: Watch = {
 watch.latest = watch.history[0]; watch.lastFailure = watch.failures[0];
 const serializedWatchBytes = Buffer.byteLength(JSON.stringify({ pk: `watch:${watch.id}`, value: watch, version: 100, expiresAt: Math.floor(now / 1000) }));
 assert(serializedWatchBytes < 48 * 1024, "Fixture-sized mature aggregates must stay within the documented size envelope");
-const report = { generatedAt: new Date().toISOString(), validation: "Local template assertions and bundle synthesis only; no AWS deployment", region: "ca-central-1", defaultPolling: "disabled", defaultCollector: "fixture", cloudActiveWatchLimit: 3, cloudRegistrationsPerHour: 6, workerConcurrency: 2, historyLimit: WATCH_LIMITS.history, jobLimit: WATCH_LIMITS.jobs, failureLimit: WATCH_LIMITS.history, serializedWatchBytes, conservativeItemEnvelopeBytes: 48 * 1024, approximateWriteUnitsPerFullPut: Math.ceil(serializedWatchBytes / 1024), approximateConsistentReadUnits: Math.ceil(serializedWatchBytes / 4096), onDemandThroughputLimits: { read: 64, write: 256 }, limitsAreMoneyCaps: false, alarmCount: 3, customMetricCount: 4, functionCount: ofType("AWS::Lambda::Function").length };
-await mkdir("docs/evidence", { recursive: true }); await writeFile("docs/evidence/aws-preparation.json", JSON.stringify(report, null, 2) + "\n"); console.log(JSON.stringify(report, null, 2));
+const report = { generatedAt: new Date().toISOString(), validation: "Local template assertions and bundle synthesis only; no AWS deployment", region, defaultPolling: "disabled", defaultCollector: "fixture", cloudActiveWatchLimit: 3, cloudRegistrationsPerHour: 6, workerConcurrency: 2, historyLimit: WATCH_LIMITS.history, jobLimit: WATCH_LIMITS.jobs, failureLimit: WATCH_LIMITS.history, serializedWatchBytes, conservativeItemEnvelopeBytes: 48 * 1024, approximateWriteUnitsPerFullPut: Math.ceil(serializedWatchBytes / 1024), approximateConsistentReadUnits: Math.ceil(serializedWatchBytes / 4096), onDemandThroughputLimits: { read: 64, write: 256 }, limitsAreMoneyCaps: false, alarmCount: 3, customMetricCount: 4, functionCount: ofType("AWS::Lambda::Function").length };
+const reportPath = region === "ca-central-1" ? "docs/evidence/aws-preparation.json" : `docs/evidence/aws-preparation-${region}.json`;
+await mkdir("docs/evidence", { recursive: true }); await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n"); console.log(JSON.stringify(report, null, 2));

@@ -137,7 +137,7 @@ Remove-Item -LiteralPath "$demoRoot/watches.sqlite", "$demoRoot/watches.sqlite-w
 
 ## Prepared AWS demo
 
-`infra/app.ts` defines one CDK stack in `ca-central-1`: an on-demand DynamoDB
+`infra/app.ts` defines one CDK stack, defaulting to `ca-central-1`: an on-demand DynamoDB
 table, refresh queue, seven-day dead-letter queue, dispatcher, collector and
 IAM-only operations function, a disabled EventBridge Scheduler schedule,
 three alarms and four custom metric filters. Lambda collectors have concurrency
@@ -160,6 +160,33 @@ Local preparation, without an AWS account:
 npm run infra:synth
 npm run infra:verify
 ```
+
+Select another deployment region explicitly with CDK context. For an AWS
+project whose home region is Ohio, keep bootstrap, synthesis and deployment
+in `us-east-2`:
+
+```powershell
+npm run infra:synth -- --context deploymentRegion=us-east-2
+npm run infra:verify -- us-east-2
+```
+
+The verifier reads the stack's cloud assembly region and checks it against the
+expected argument; region-specific evidence is written alongside the default
+report. Pass the same `--context deploymentRegion=us-east-2` to `cdk diff` and
+`cdk deploy`. Region selection does not change polling, fixture mode, quotas
+or concurrency bounds. Recheck regional pricing rather than using the default
+Canada cost assumptions as an Ohio quote.
+
+New AWS accounts can have reduced Lambda concurrency quotas. Before deploying,
+read `aws lambda get-account-settings --region us-east-2` (use the selected
+region). This stack reserves four executions across three functions: collector
+two, dispatcher one and operations API one. AWS requires at least 100
+executions to remain unreserved, so the current stack needs at least 104
+unreserved executions available before its reservations. If the actual quota
+is smaller, stop before deployment and agree on a bounded alternative or an
+eligible quota increase; do not remove these limits implicitly. SQS's separate
+maximum concurrency of two limits that event source, but it does not limit
+direct collector invocations or replace dispatcher/API function limits.
 
 The default stack uses fixture collectors and disabled polling. The template
 and bundled Lambda assets have been validated locally. This is not evidence of
@@ -245,6 +272,10 @@ Sources checked October 13, 2026: [Free Tier FAQ](https://aws.amazon.com/free/fr
 [SQS/Lambda errors and partial batches](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html),
 [DynamoDB concurrent updates](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/BestPractices_ImplementingVersionControl.html),
 [Scheduler state](https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-schedule-state.html).
+
+Concurrency prerequisites: [new-account Lambda quotas](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html),
+[reserved concurrency](https://docs.aws.amazon.com/lambda/latest/dg/configuration-concurrency.html),
+[SQS maximum concurrency](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-scaling.html).
 
 ## Five-minute design/demo guide
 

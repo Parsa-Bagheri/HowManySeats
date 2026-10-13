@@ -11,7 +11,9 @@ import { CfnSchedule } from "aws-cdk-lib/aws-scheduler";
 import { resolve } from "node:path";
 
 const app = new App();
-const stack = new Stack(app, "HowManySeatsWatchDemo", { env: { region: "ca-central-1" }, description: "Isolated, bounded background screening watch demo" });
+const deploymentRegion = app.node.tryGetContext("deploymentRegion") ?? "ca-central-1";
+if (typeof deploymentRegion !== "string" || !/^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/.test(deploymentRegion)) throw new Error("Specify a valid deploymentRegion, such as ca-central-1 or us-east-2.");
+const stack = new Stack(app, "HowManySeatsWatchDemo", { env: { region: deploymentRegion }, description: "Isolated, bounded background screening watch demo" });
 const live = app.node.tryGetContext("enableLive") === "true";
 const polling = app.node.tryGetContext("enablePolling") === "true";
 if (polling && !live) throw new Error("Polling requires an explicitly verified live provider environment.");
