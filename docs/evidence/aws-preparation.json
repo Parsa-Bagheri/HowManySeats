@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-10-13T21:17:12.634Z",
+  "validation": "Local template assertions and bundle synthesis only; no AWS deployment",
+  "region": "ca-central-1",
+  "defaultPolling": "disabled",
+  "defaultCollector": "fixture",
+  "cloudActiveWatchLimit": 3,
+  "cloudRegistrationsPerHour": 6,
+  "workerConcurrency": 2,
+  "historyLimit": 24,
+  "jobLimit": 64,
+  "failureLimit": 24,
+  "serializedWatchBytes": 29239,
+  "conservativeItemEnvelopeBytes": 49152,
+  "approximateWriteUnitsPerFullPut": 29,
+  "approximateConsistentReadUnits": 8,
+  "onDemandThroughputLimits": {
+    "read": 64,
+    "write": 256
+  },
+  "limitsAreMoneyCaps": false,
+  "alarmCount": 3,
+  "customMetricCount": 4,
+  "functionCount": 3
+}

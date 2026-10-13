@@ -14,6 +14,8 @@ export function buildSeatSnapshot(
   let occupiedAccessibleSeats = 0;
   let companionSeats = 0;
   let occupiedCompanionSeats = 0;
+  let unknownSeats = 0;
+  let excludedSeats = 0;
 
   for (const seat of rawSeats) {
     const status = seat.status?.trim().toLowerCase();
@@ -21,6 +23,8 @@ export function buildSeatSnapshot(
     const occupied = Boolean(status && OCCUPIED_SEAT_STATUSES.has(status));
 
     if (status !== "available" && !occupied) {
+      if (status && ["broken", "house", "unavailable", "disabled"].includes(status)) excludedSeats++;
+      else unknownSeats++;
       continue;
     }
 
@@ -44,6 +48,8 @@ export function buildSeatSnapshot(
 
   return {
     checkedAt: checkedAt.toISOString(),
+    unknownSeats,
+    excludedSeats,
     sellableSeats,
     occupiedEstimate,
     accessibleSeats,

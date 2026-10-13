@@ -33,6 +33,10 @@ export type Showtime = {
 
 export type SeatSnapshot = {
   checkedAt: string;
+  /** Seat-map entries excluded because their status is unrecognized or missing. */
+  unknownSeats?: number;
+  /** Recognized unavailable/broken/house entries, excluded from sellable totals. */
+  excludedSeats?: number;
   sellableSeats: number;
   occupiedEstimate: number;
   /** Total sellable wheelchair-accessible seats. */

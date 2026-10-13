@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-10-13T21:00:33.122Z",
+  "environment": {
+    "node": "v24.21.0",
+    "platform": "win32",
+    "arch": "x64",
+    "storage": "SQLite WAL",
+    "provider": "synthetic replay fixtures",
+    "collectorDelayMs": 50,
+    "workloadLeaseMs": 2000,
+    "clock": "process wall clock"
+  },
+  "twoWorkers": {
+    "watches": 12,
+    "uniqueJobs": 24,
+    "deliveries": 48,
+    "workerPids": [
+      29496,
+      17212
+    ],
+    "elapsedMs": 4801,
+    "uniqueJobsPerSecond": 4.99895855030202,
+    "workerDurationP50Ms": 95,
+    "workerDurationP95Ms": 106,
+    "duplicateHistory": 0,
+    "latestRegressions": 0
+  },
+  "crashRecovery": {
+    "actualExitCode": 86,
+    "historyBeforeReplay": 1,
+    "historyAfterReplay": 1,
+    "queueRemaining": 0
+  },
+  "expiredLease": {
+    "oldPid": 22960,
+    "replacementPid": 32400,
+    "fencedCommits": 1,
+    "historyEntries": 1
+  },
+  "totalElapsedMs": 9927,
+  "cloudDeployed": false
+}

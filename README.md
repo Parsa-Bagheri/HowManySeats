@@ -24,6 +24,8 @@ Cineplex or Landmark Cinemas.
 - Direct links to each cinema's public purchase flow and seat-map preview
 - Separate totals and occupied counts for standard, accessible, and companion
   seats
+- Optional background Cineplex watches with browser favorites, timestamped
+  history, freshness states, and inspectable provider failures
 
 ## How it works
 
@@ -122,6 +124,39 @@ src/lib/       Provider clients, search logic, geocoding, and seat scoring
 ```
 
 Tests are colocated with the library modules as `*.test.ts` files.
+
+## Background screening watches
+
+Background watches are disabled unless a server backend is configured. They
+do not change interactive search or Landmark's browser collection. A server
+confirms Cineplex screening identifiers against its directory/showtimes,
+refreshes every five minutes until the screening starts (at most 48 hours),
+and retains 24 observations with separate accessibility and unknown counts.
+Favorites live in the browser; removing one does not stop a shared refresh.
+
+For a free local fixture demo in PowerShell, set these variables in each
+terminal after `npm ci`:
+
+```powershell
+$env:WATCH_BACKEND='local'
+$env:WATCH_MODE='fixture'
+$env:WATCH_DB_PATH='.watch-data/watches.sqlite'
+```
+
+Run `npm run dev -- -p 4311`, `npm run watch:dispatcher`, and
+`npm run watch:worker` in separate terminals. Start a second worker in another
+terminal. Open [the local watch page](http://localhost:4311/watches) and choose
+the fixture demo buttons. Fixtures make no cinema requests. Stop each process
+with Ctrl+C. For a live local provider run, use `WATCH_MODE=live` and add watches
+from ordinary Cineplex search results; the existing provider deadlines apply.
+
+`npm run watch:verify` runs an isolated two-process replay, a real process crash
+after storage, and expired-lease recovery. It writes measured results under
+`docs/evidence`. `npm run watch:ops -- inspect` shows watches, freshness, queue
+age, retries and dead letters. The [operations/design guide](docs/background-watches.md)
+includes export, pause, cleanup, the five-minute demo, and the prepared AWS
+deployment. The [evidence note](docs/watch-evidence.md) distinguishes local
+verification from cloud deployment.
 
 ## Acknowledgment
 

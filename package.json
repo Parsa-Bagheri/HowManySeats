@@ -7,10 +7,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test src/app/api/cineplex-seats/route.test.ts src/lib/browser-cinema-search.test.ts src/lib/cinema-search.test.ts src/lib/cineplex-client.test.ts src/lib/client-search-results.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/landmark-client.test.ts src/lib/landmark-titles.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "node --import tsx --test src/app/api/cineplex-seats/route.test.ts src/app/api/watches/route.test.ts src/lib/watches/service.test.ts src/lib/watches/collector.test.ts src/lib/watches/aws.test.ts src/lib/browser-cinema-search.test.ts src/lib/cinema-search.test.ts src/lib/cineplex-client.test.ts src/lib/client-search-results.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/landmark-client.test.ts src/lib/landmark-titles.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts",
+    "typecheck": "tsc --noEmit",
+    "watch:worker": "node --import tsx scripts/watch-service.ts worker",
+    "watch:dispatcher": "node --import tsx scripts/watch-service.ts dispatcher",
+    "watch:ops": "node --import tsx scripts/watch-service.ts",
+    "watch:verify": "node --import tsx scripts/watch-replay.ts",
+    "infra:synth": "cdk synth --no-lookups --quiet",
+    "infra:verify": "node --import tsx scripts/verify-watch-infra.ts",
+    "infra:diff": "cdk diff"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1151.0",
+    "@aws-sdk/client-sqs": "^3.1151.0",
+    "@aws-sdk/lib-dynamodb": "^3.1151.0",
     "@photostructure/tz-lookup": "^11.6.1",
     "lucide-react": "^0.468.0",
     "next": "^15.5.15",
@@ -27,10 +37,15 @@
     }
   },
   "devDependencies": {
+    "@types/aws-lambda": "^8.10.164",
     "@types/node": "^22.15.0",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
     "autoprefixer": "^10.4.21",
+    "aws-cdk": "^2.1145.0",
+    "aws-cdk-lib": "^2.273.0",
+    "constructs": "^10.8.1",
+    "esbuild": "^0.28.2",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.4",
