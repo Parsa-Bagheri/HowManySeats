@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { WatchError, watchState } from "@/lib/watches/model";
+import { watchConfiguration } from "@/lib/watches/configuration";
 import { resolveScreening, watchRuntime } from "@/lib/watches/runtime";
 
 export const runtime = "nodejs";
@@ -10,14 +11,23 @@ const registrationSchema = z.object({ theatreId: z.string().regex(/^\d{1,10}$/),
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  if (url.searchParams.has("status")) return NextResponse.json({ enabled: ["local", "aws"].includes(process.env.WATCH_BACKEND ?? ""), fixture: process.env.WATCH_MODE === "fixture" });
+  if (url.searchParams.has("status")) {
+    let context;
+    try {
+      const configuration = watchConfiguration();
+      context = configuration.enabled ? await watchRuntime() : undefined;
+      return NextResponse.json({ enabled: configuration.enabled, fixture: configuration.fixture, accepting: context ? await context.service.operating() : false, endDate: configuration.endAt ? new Date(configuration.endAt).toISOString() : null }, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) { return failure(error); }
+    finally { context?.close(); }
+  }
   const ids = url.searchParams.getAll("id");
   if (!ids.length || ids.length > 10 || ids.some((id) => !idSchema.safeParse(id).success)) return NextResponse.json({ error: "Request up to ten valid screening watches." }, { status: 400 });
   let context;
   try {
     context = await watchRuntime();
     const watches = await Promise.all(ids.map((id) => context!.service.get(id)));
-    return NextResponse.json({ watches: watches.filter(Boolean).map((watch) => ({ ...watch!, state: watchState(watch!), fixture: process.env.WATCH_MODE === "fixture" })) }, { headers: { "Cache-Control": "no-store" } });
+    const operating = await context.service.operating();
+    return NextResponse.json({ watches: watches.filter(Boolean).map((watch) => ({ ...watch!, state: !operating && watchState(watch!) !== "ended" ? "paused" : watchState(watch!), fixture: process.env.WATCH_MODE === "fixture" })) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return failure(error); }
   finally { context?.close(); }
 }

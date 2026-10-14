@@ -28,7 +28,7 @@ export type Watch = {
   failures: Failure[]; lastFailure?: Failure; lastSuccessAt?: number;
   totals: { success: number; failure: number; duplicate: number; fenced: number };
 };
-export type Registry = { entries: Record<string, number>; window: number; attempts: number };
+export type Registry = { entries: Record<string, number>; window: number; attempts: number; paused?: boolean };
 export type Message = { watchId: string; jobKey: string; scheduledAt: number };
 export type Delivery = { id: string; receipt: string; message: Message; enqueuedAt: number };
 

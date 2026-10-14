@@ -129,3 +129,36 @@ test("SQLite queue receipts fence old acknowledgements after abandoned-work reco
   await h.store.acknowledge(old); assert.equal(h.store.inspect().length, 1);
   await h.store.acknowledge(newer); assert.equal(h.store.inspect().length, 0);
 });
+
+
+test("operating deadline stops registration, scheduled dispatch and queued provider work while retaining history", async (t) => {
+  const h = await harness(t); const end = h.clock.now + 60_000;
+  const service = new WatchService(h.store, h.queue, () => h.clock.now, end);
+  await service.register(h.screening.showtime.id, async () => h.screening);
+  const delivery = h.queue.deliveries[0];
+  assert.equal(await service.process(delivery, async () => h.observation()), "stored");
+  h.clock.now = end;
+  let collected = false;
+  await assert.rejects(service.register("cineplex-7402-900002", async () => { throw new Error("Must not discover"); }), /window has ended/);
+  await service.dispatch(); assert.equal(h.queue.deliveries.length, 1);
+  assert.equal(await service.process(delivery, async () => { collected = true; return h.observation(); }), "duplicate-or-inactive");
+  assert.equal(collected, false); assert.equal((await service.get(h.screening.showtime.id))!.history.length, 1);
+});
+test("a collector crossing the operating deadline is fenced before committing", async (t) => {
+  const h = await harness(t); const end = h.clock.now + 60_000;
+  const service = new WatchService(h.store, h.queue, () => h.clock.now, end);
+  await service.register(h.screening.showtime.id, async () => h.screening);
+  assert.equal(await service.process(h.queue.deliveries[0], async () => { h.clock.now = end; return h.observation(); }, { leaseMs: 120_000 }), "fenced");
+  assert.equal((await service.get(h.screening.showtime.id))!.history.length, 0);
+});
+test("shared pause stops independent hosts and fences an in-flight collector; resume is deliberate", async (t) => {
+  const h = await harness(t); const other = new WatchService(h.store, h.queue, () => h.clock.now);
+  await h.service.register(h.screening.showtime.id, async () => h.screening);
+  assert.equal(await h.service.process(h.queue.deliveries[0], async () => { await other.pauseAll(true); return h.observation(); }), "fenced");
+  assert.equal(await h.service.operating(), false);
+  await assert.rejects(h.service.register("cineplex-7402-900002", async () => { throw new Error("Must not discover"); }), /paused/);
+  await h.service.dispatch(); assert.equal(h.queue.deliveries.length, 1);
+  await other.pauseAll(false); assert.equal(await h.service.operating(), true);
+  assert.equal((await h.service.get(h.screening.showtime.id))!.paused, true);
+  await other.pause(h.screening.showtime.id, false);
+});

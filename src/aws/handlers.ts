@@ -34,9 +34,10 @@ export async function processBatch(event: SQSEvent, service: import("../lib/watc
 }
 
 // Invoke with IAM credentials for isolated demos/operations. No public unauthenticated Lambda URL.
-export async function api(event: { action: "register" | "get" | "pause" | "probe"; theatreId?: string; showtimeId?: string; id?: string; paused?: boolean }) {
-  z.enum(["register", "get", "pause", "probe"]).parse(event.action);
+export async function api(event: { action: "register" | "get" | "pause" | "probe" | "pauseAll"; theatreId?: string; showtimeId?: string; id?: string; paused?: boolean }) {
+  z.enum(["register", "get", "pause", "probe", "pauseAll"]).parse(event.action);
   const { service } = awsRuntime();
+  if (event.action === "pauseAll") { await service.pauseAll(z.boolean().parse(event.paused)); return { operating: await service.operating() }; }
   if (event.action === "get") {
     const watch = await service.get(z.string().regex(/^cineplex-\d{1,10}-\d{1,20}$/).parse(event.id));
     return watch ? { ...watch, state: watchState(watch) } : undefined;

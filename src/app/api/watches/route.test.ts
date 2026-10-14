@@ -23,3 +23,12 @@ test("watch API creates a fixture watch and returns persisted pending data acros
   assert.equal((await GET(new Request("http://localhost/api/watches?id=bad"))).status, 400);
   assert.equal((await GET(new Request(`http://localhost/api/watches?${Array.from({ length: 11 }, () => "id=cineplex-7402-900001").join("&")}`))).status, 400);
 });
+
+
+test("status and registration fail closed on Vercel SQLite/fixture misconfiguration", async (t) => {
+  const previous = { VERCEL: process.env.VERCEL, WATCH_BACKEND: process.env.WATCH_BACKEND, WATCH_MODE: process.env.WATCH_MODE };
+  t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  process.env.VERCEL = "1"; process.env.WATCH_BACKEND = "local"; process.env.WATCH_MODE = "fixture";
+  assert.equal((await GET(new Request("http://localhost/api/watches?status=1"))).status, 503);
+  assert.equal((await POST(new Request("http://localhost/api/watches", { method: "POST", body: JSON.stringify({ theatreId: "7402", showtimeId: "900001" }) }))).status, 503);
+});

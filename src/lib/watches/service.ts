@@ -5,7 +5,14 @@ import { CollectionError, WatchError, WATCH_LIMITS, type Collector, type Deliver
 const watchKey = (id: string) => `watch:${id}`;
 const emptyRegistry = (): Registry => ({ entries: {}, window: 0, attempts: 0 });
 export class WatchService {
-  constructor(public readonly store: DocumentStore, public readonly queue: DurableQueue, private readonly now = Date.now) {}
+  constructor(public readonly store: DocumentStore, public readonly queue: DurableQueue, private readonly now = Date.now, private readonly operatingEndAt?: number) {}
+
+  async operating() { return (!this.operatingEndAt || this.now() < this.operatingEndAt) && !(await this.store.get<Registry>("registry"))?.paused; }
+  async pauseAll(paused: boolean) {
+    await this.store.mutate<Registry, void>("registry", (value = emptyRegistry()) => { value.paused = paused; return { value, result: undefined }; });
+    // Pausing each watch fences collectors already in flight before this operation returns.
+    if (paused) for (const watch of await this.list()) await this.pause(watch.id, true);
+  }
 
   async get(id: string) { return this.store.get<Watch>(watchKey(id)); }
   async list() {
@@ -15,11 +22,13 @@ export class WatchService {
   }
 
   async register(id: string, resolve: () => Promise<SearchCandidate>) {
+    if (!await this.operating()) throw new WatchError(503, "Background collection is paused or its operating window has ended.");
     const existing = await this.get(id);
     // Joining an existing watch cannot extend its lifetime or change its canonical metadata.
     if (existing && existing.expiresAt > this.now()) return existing;
     const now = this.now();
     await this.store.mutate<Registry, void>("registry", (value = emptyRegistry()) => {
+      if (value.paused) throw new WatchError(503, "Background collection is paused.");
       value.entries = Object.fromEntries(Object.entries(value.entries).filter(([, expiry]) => expiry > now));
       const window = Math.floor(now / 3_600_000);
       if (value.window !== window) { value.window = window; value.attempts = 0; }
@@ -43,6 +52,7 @@ export class WatchService {
     const startsAt = Date.parse(screening.showtime.startsAt);
     const expiresAt = Math.min(startsAt, now + WATCH_LIMITS.durationMs);
     const watch = await this.store.mutatePair<Watch, Registry, Watch>([watchKey(id), "registry"], (current, registry = emptyRegistry()) => {
+      if (registry.paused || (this.operatingEndAt && this.now() >= this.operatingEndAt)) throw new WatchError(503, "Background collection is paused or its operating window has ended.");
       if ((registry.entries[id] ?? 0) <= this.now()) throw new WatchError(409, "Registration expired. Try again.");
       const value: Watch = current && current.expiresAt > now ? current : {
         id, screening: { theatre: screening.theatre, showtime: screening.showtime }, createdAt: now, expiresAt,
@@ -64,15 +74,17 @@ export class WatchService {
     });
   }
   async dispatch() {
+    if (!await this.operating()) return;
     for (const watch of await this.list()) {
       if (!watch.paused && watch.expiresAt > this.now()) await this.dispatchWatch(watch.id);
     }
   }
   async dispatchWatch(id: string) {
+    if (!await this.operating()) return;
     const now = this.now();
     const messages = await this.store.mutate<Watch, Message[]>(watchKey(id), (watch) => {
       if (!watch) throw new WatchError(404, "Watch not found.");
-      if (watch.paused || watch.expiresAt <= now) return { value: watch, result: [] };
+      if (watch.paused || watch.expiresAt <= now || (this.operatingEndAt !== undefined && this.now() >= this.operatingEndAt)) return { value: watch, result: [] };
       const sorted = Object.values(watch.jobs).sort((a, b) => a.scheduledAt - b.scheduledAt);
       for (const job of sorted.slice(0, Math.max(0, sorted.length - WATCH_LIMITS.jobs + 1))) {
         // Retire a contiguous prefix only, so delayed pending jobs are never accidentally retired.
@@ -102,6 +114,7 @@ export class WatchService {
   }
 
   async process(delivery: Delivery, collector: Collector, hooks: { afterStore?: () => Promise<void>; leaseMs?: number } = {}) {
+    if (!await this.operating()) { await this.queue.acknowledge(delivery); return "duplicate-or-inactive"; }
     const started = this.now();
     const token = randomUUID();
     const leaseMs = hooks.leaseMs ?? WATCH_LIMITS.leaseMs;
@@ -132,7 +145,7 @@ export class WatchService {
       const outcome = await this.store.mutate<Watch, { fenced: boolean; dead: boolean; retryAt: number }>(watchKey(message.watchId), (watch) => {
         if (!watch) throw new Error("Watch disappeared");
         const job = watch.jobs[message.jobKey];
-        if (!ownsLease(job, token, this.now()) || watch.expiresAt <= this.now() || watch.paused) { watch.totals.fenced++; return { value: watch, result: { fenced: true, dead: false, retryAt: now } }; }
+        if (!ownsLease(job, token, this.now()) || watch.expiresAt <= this.now() || watch.paused || (this.operatingEndAt !== undefined && this.now() >= this.operatingEndAt)) { watch.totals.fenced++; return { value: watch, result: { fenced: true, dead: false, retryAt: now } }; }
         const dead = !failure.retryable || job.attempts >= WATCH_LIMITS.attempts;
         const retryAt = now + Math.min(60_000 * 2 ** (job.attempts - 1), WATCH_LIMITS.intervalMs);
         job.status = dead ? "dead" : "pending"; job.nextAttemptAt = retryAt; job.leaseToken = undefined; job.leaseUntil = undefined;
@@ -149,7 +162,7 @@ export class WatchService {
     const committed = await this.store.mutate<Watch, boolean>(watchKey(message.watchId), (watch) => {
       if (!watch) throw new Error("Watch disappeared");
       const job = watch.jobs[message.jobKey];
-      if (!ownsLease(job, token, this.now()) || watch.expiresAt <= this.now() || watch.paused) { watch.totals.fenced++; return { value: watch, result: false }; }
+      if (!ownsLease(job, token, this.now()) || watch.expiresAt <= this.now() || watch.paused || (this.operatingEndAt !== undefined && this.now() >= this.operatingEndAt)) { watch.totals.fenced++; return { value: watch, result: false }; }
       const observedAt = Date.parse(observation.checkedAt);
       if (!Number.isFinite(observedAt) || observedAt > now + 5_000) throw new Error("Collector returned invalid observation time");
       const snapshot = { jobKey: job.key, scheduledAt: job.scheduledAt, observedAt, storedAt: now, seats: observation };

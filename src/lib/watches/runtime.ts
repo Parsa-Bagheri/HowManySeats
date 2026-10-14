@@ -3,8 +3,10 @@ import { CineplexClient } from "../cineplex-client";
 import { fixtureScreening } from "./fixtures";
 import { WatchError } from "./model";
 import { WatchService } from "./service";
+import { watchConfiguration } from "./configuration";
 
 export async function watchRuntime() {
+  watchConfiguration();
   if (process.env.WATCH_BACKEND === "aws") {
     const { awsRuntime } = await import("./aws");
     return awsRuntime();
@@ -17,6 +19,7 @@ export async function watchRuntime() {
 }
 
 export async function resolveScreening(theatreId: string, showtimeId: string) {
+  watchConfiguration();
   if (process.env.WATCH_MODE === "fixture") {
     if (theatreId !== "7402" || !/^90000[1-5]$/.test(showtimeId)) throw new WatchError(400, "Choose one of the demo screenings.");
     return fixtureScreening(showtimeId);

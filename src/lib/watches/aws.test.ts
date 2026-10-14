@@ -50,3 +50,15 @@ test("Lambda mixed batches acknowledge successful records and retry only failed 
 test("AWS operations reject unknown actions before resource initialization", async () => {
   await assert.rejects(api({ action: "unexpected" } as unknown as Parameters<typeof api>[0]));
 });
+
+
+test("production DynamoDB keys are isolated from legacy demo records, including atomic registration", async () => {
+  const fake = new FakeDynamo(); const client = fake as unknown as DynamoDBDocumentClient;
+  const demo = new DynamoStore("shared-table", client); const production = new DynamoStore("shared-table", client, "production:");
+  await demo.mutate("watch:example", () => ({ value: { mode: "fixture" }, result: undefined }));
+  assert.equal(await production.get("watch:example"), undefined);
+  await production.mutatePair<{ mode: string }, { entries: string[] }, void>(["watch:example", "registry"], () => ({ values: [{ mode: "live" }, { entries: ["example"] }], result: undefined }));
+  assert.equal((await production.get<{ mode: string }>("watch:example"))?.mode, "live");
+  assert.equal((await demo.get<{ mode: string }>("watch:example"))?.mode, "fixture");
+  assert(fake.rows.has("production:registry")); assert(!fake.rows.has("registry"));
+});

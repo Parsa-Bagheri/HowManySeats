@@ -21,3 +21,13 @@ test-results
 # Non-runtime project notes and generated captures
 docs
 db
+
+cdk.out
+cdk.*.out
+.watch-data
+.watch-release
+infra
+scripts
+
+.playwright-cli
+output/playwright

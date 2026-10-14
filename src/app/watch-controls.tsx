@@ -6,18 +6,18 @@ import type { Watch } from "@/lib/watches/model";
 
 const STORAGE_KEY = "howmanyseats:watches:v1";
 type WatchView = Watch & { state: string; fixture: boolean };
-type Context = { enabled: boolean; fixture: boolean; ids: string[]; add: (theatreId: string, showtimeId: string) => Promise<void>; remove: (id: string) => void };
+type Context = { enabled: boolean; fixture: boolean; accepting: boolean; endDate: string | null; ids: string[]; add: (theatreId: string, showtimeId: string) => Promise<void>; remove: (id: string) => void };
 const WatchContext = createContext<Context | null>(null);
 export function WatchProvider({ children }: { children: ReactNode }) {
   const [ids, setIds] = useState<string[]>([]);
-  const [configuration, setConfiguration] = useState({ enabled: false, fixture: false });
+  const [configuration, setConfiguration] = useState({ enabled: false, fixture: false, accepting: false, endDate: null as string | null });
   useEffect(() => {
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]");
       if (Array.isArray(saved)) setIds(saved.filter((id): id is string => typeof id === "string" && /^cineplex-\d{1,10}-\d{1,20}$/.test(id)).slice(0, 10));
     } catch { /* A blocked/corrupt browser store does not prevent using this page. */ }
     const controller = new AbortController();
-    fetch("/api/watches?status=1", { signal: controller.signal }).then((response) => response.json()).then(setConfiguration).catch(() => {});
+    fetch("/api/watches?status=1", { signal: controller.signal }).then((response) => response.ok ? response.json() : Promise.reject(new Error("Watch service unavailable"))).then(setConfiguration).catch(() => {});
     return () => controller.abort();
   }, []);
   const save = useCallback((change: (current: string[]) => string[]) => {
@@ -46,12 +46,12 @@ export function WatchAction({ screening, fun = false }: { screening: SearchCandi
   if (!context?.enabled || screening.theatre.provider !== "cineplex") return null;
   const saved = context.ids.includes(screening.showtime.id);
   return <div className={`mt-3 text-sm ${fun ? "font-bold text-black" : "text-neutral-100"}`}>
-    {saved ? <a className="focus-ring underline" href="/watches">View watched screening</a> : <button className={`focus-ring min-h-11 rounded border px-3 py-2 ${fun ? "border-black bg-[#00e676]" : "border-neutral-600"}`} disabled={pending} onClick={async () => {
+    {saved ? <a className="focus-ring underline" href="/watches">View watched screening</a> : <button className={`focus-ring min-h-11 rounded border px-3 py-2 ${fun ? "border-black bg-[#00e676]" : "border-neutral-600"}`} disabled={pending || !context.accepting} onClick={async () => {
       setPending(true); setError("");
       try { await context.add(screening.theatre.providerTheatreId, screening.showtime.providerShowtimeId); }
       catch (failure) { setError(failure instanceof Error ? failure.message : "Could not save this watch."); }
       finally { setPending(false); }
-    }}>{pending ? "Saving watch…" : "Watch availability"}</button>}
+    }}>{pending ? "Saving watch…" : !context.accepting ? "Collection paused" : "Watch availability"}</button>}
     {error ? <p role="alert" className="mt-2">{error}</p> : null}
   </div>;
 }
@@ -88,8 +88,10 @@ export function WatchList() {
   return <main className="mx-auto max-w-5xl px-4 py-8 text-neutral-100">
     <a href="/" className="focus-ring underline">Back to search</a>
     <h1 className="mt-6 text-3xl font-semibold">Watched screenings</h1>
-    <p className="mt-3 text-neutral-300">Cineplex observations refresh about every five minutes until the screening starts, for up to 48 hours. Numbers describe a past observation and can change. Favorites are saved in this browser.</p>
+    <p className="mt-3 text-neutral-300">While collection is operating, Cineplex observations refresh about every five minutes until the screening starts, for up to 48 hours. Numbers describe a past observation and can change. Favorites are saved in this browser.</p>
     {context.fixture ? <section className="mt-5 rounded-lg border border-amber-400 p-4"><h2 className="font-semibold">Fixture demo</h2><p className="mt-1 text-sm">Synthetic observations; no cinema requests are made.</p><div className="mt-3 flex flex-wrap gap-3">{[["900001", "Healthy screening"], ["900002", "Partial data"], ["900003", "Timeout"], ["900005", "Malformed data"]].map(([id, label]) => <button key={id} disabled={saving} className="focus-ring min-h-11 rounded border border-neutral-600 px-3" onClick={async () => { setSaving(true); try { await context.add("7402", id); } catch (failure) { setError(failure instanceof Error ? failure.message : "Could not add demo."); } finally { setSaving(false); } }}>{label}</button>)}</div></section> : null}
+    {context.endDate ? <p className="mt-3 text-neutral-300">This collection window ends {new Date(context.endDate).toLocaleString()}.</p> : null}
+    {context.enabled && !context.accepting ? <p role="status" className="mt-3">Background collection is paused or its operating window has ended. Retained observations remain available.</p> : null}
     {!context.enabled ? <p className="mt-6">Background watches are not enabled on this server.</p> : null}
     {error ? <p role="alert" className="mt-5 rounded border border-red-400 p-3">{error} Displayed observations may be stale.</p> : null}
     {!loaded ? <p role="status" className="mt-6">Loading favorites…</p> : null}

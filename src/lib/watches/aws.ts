@@ -3,12 +3,14 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, TransactWriteCommand } 
 import { ChangeMessageVisibilityCommand, SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import type { Delivery, DocumentStore, DurableQueue, Message } from "./model";
 import { WatchService } from "./service";
+import { awsWatchClientOptions } from "./aws-client";
+import { watchConfiguration } from "./configuration";
 
 type Item = { pk: string; value: unknown; version: number; expiresAt?: number };
 export class DynamoStore implements DocumentStore {
-  constructor(private readonly table: string, private readonly client = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } })) {}
+  constructor(private readonly table: string, private readonly client = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } }), private readonly namespace = "") {}
   private async read(key: string): Promise<Item | undefined> {
-    const response = await this.client.send(new GetCommand({ TableName: this.table, Key: { pk: key }, ConsistentRead: true }));
+    const response = await this.client.send(new GetCommand({ TableName: this.table, Key: { pk: this.namespace + key }, ConsistentRead: true }));
     return response.Item as Item | undefined;
   }
   async get<T>(key: string) { return (await this.read(key))?.value as T | undefined; }
@@ -31,7 +33,7 @@ export class DynamoStore implements DocumentStore {
   private write(key: string, previous: Item | undefined, value: unknown, expiresAt?: number) {
     const ttl = expiresAt ? Math.floor(expiresAt / 1000) : previous?.expiresAt;
     return {
-      Item: { pk: key, value, version: (previous?.version ?? 0) + 1, ...(ttl ? { expiresAt: ttl } : {}) },
+      Item: { pk: this.namespace + key, value, version: (previous?.version ?? 0) + 1, ...(ttl ? { expiresAt: ttl } : {}) },
       ConditionExpression: previous ? "#v = :version" : "attribute_not_exists(pk)",
       ...(previous ? { ExpressionAttributeNames: { "#v": "version" }, ExpressionAttributeValues: { ":version": previous.version } } : {}),
     };
@@ -63,5 +65,9 @@ export class SqsQueue implements DurableQueue {
 export function awsRuntime() {
   const table = process.env.WATCH_TABLE; const queueUrl = process.env.WATCH_QUEUE_URL; const dlqUrl = process.env.WATCH_DLQ_URL;
   if (!table || !queueUrl || !dlqUrl) throw new Error("AWS watch resources are not configured");
-  return { service: new WatchService(new DynamoStore(table), new SqsQueue(queueUrl, dlqUrl)), close: () => {} };
+  const configuration = watchConfiguration();
+  if (!configuration.enabled || process.env.WATCH_BACKEND !== "aws") throw new Error("AWS watches must be explicitly enabled");
+  const options = awsWatchClientOptions();
+  const store = new DynamoStore(table, DynamoDBDocumentClient.from(new DynamoDBClient(options), { marshallOptions: { removeUndefinedValues: true } }), configuration.production ? "production:" : "");
+  return { service: new WatchService(store, new SqsQueue(queueUrl, dlqUrl, new SQSClient(options)), Date.now, configuration.endAt), close: () => {} };
 }

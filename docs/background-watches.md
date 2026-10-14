@@ -1,5 +1,7 @@
 # Background Cineplex watches
 
+Production pilot configuration is documented separately in [the release runbook](production-release.md). It preserves the demo safeguards below; preparation is not evidence of a public release.
+
 A visitor saves a screening from either search theme, then sees timestamped
 availability on `/watches`. The browser saves up to ten screening IDs; no new
 account system is required. The shared service confirms cinema, timezone,
@@ -262,8 +264,8 @@ calculator for `ca-central-1` and account-specific availability before approval.
 
 | Workload | Planning estimate before credits |
 | --- | --- |
-| Three watches, 15 minutes, roughly 12 refreshes with mature 48 KB documents | $0.02â€“$0.05 incremental requests/compute/logs, assuming bounded retries and at most 100 Lambda invocations; plus prorated monitoring |
-| Three watches running continuously for 24 hours, 864 refreshes | About $0.35â€“$0.65/day at the conservative item envelope and function timeouts; excludes extra UI/read traffic and repeated infrastructure failures |
+| Three watches, 15 minutes, roughly 12 refreshes with mature 48 KB documents | $0.02Ã¢â‚¬â€œ$0.05 incremental requests/compute/logs, assuming bounded retries and at most 100 Lambda invocations; plus prorated monitoring |
+| Three watches running continuously for 24 hours, 864 refreshes | About $0.35Ã¢â‚¬â€œ$0.65/day at the conservative item envelope and function timeouts; excludes extra UI/read traffic and repeated infrastructure failures |
 | Stack left idle, schedule disabled, no metric publication | Up to $0.45/month for three alarms, plus small retained table/log/bootstrap storage |
 | A month with four custom metrics publishing regularly | Up to $1.40/month for metrics in addition to alarms/storage |
 
