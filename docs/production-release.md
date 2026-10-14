@@ -1,9 +1,13 @@
 # HowManySeats production watch pilot
 
 Prepared October 13, 2026 for existing PR #6, branch `feature/5-background-watches`.
-**State: prepared, not released.** The public site and cloud polling are unchanged.
-Release requires approval of the concrete pilot costs, stack update, service key,
-PR merge and website promotion. Record the exact reviewed SHA before execution.
+**State: released and verified; approved pilot enabled.** Initial code is
+`7f3354d724d86e212a83b915d09f3dbaeae18b0e`; initial tested production deployment is
+`dpl_87m6FBawmHgTwyaccqgRE96Ru3TN`. The maintainer approved the costs, stack update,
+scoped service key, PR merge and promotion. Final merge/build identifiers are
+recorded in PR #6 and the private manifest. See [the release evidence](production-release-evidence.md).
+The original approved end is `2026-10-15T03:17:03.1281272Z` (October 14, 11:17:03 PM Eastern).
+The pause/resume procedure was verified without extending this window.
 
 ## Selected configuration
 
@@ -86,16 +90,17 @@ the IAM user and its inline policy. Existing Lambda assets/environments change;
 Scheduler receives EndDate; table, queues and log groups receive RETAIN removal
 policies. The enabled release also changes Scheduler state to ENABLED. No new
 table, queue, Lambda, public endpoint, stack, region, NAT gateway or alarm.
-The refresh queue was empty in read-only preflight. One earlier intentionally
-failed fixture remains in the DLQ; distinguish this baseline from new failures.
-Export and remove only that identified old fixture message after approval if
-needed to clear the baseline alarm; never purge an entire queue.
+The refresh queue was empty in read-only preflight. The earlier intentionally failed fixture dead letter was privately archived and
+removed by its verified individual receipt; the DLQ reported zero remaining
+messages. Alarm evaluation can lag cleanup. Never purge an entire queue.
 
 Verified locally: 102 application tests, nine infrastructure-window tests,
 typecheck, production build, zero production-dependency audit advisories, demo
 synthesis/assertions, and both disabled/enabled production template assertions.
 The local two-process replay delivered 24 jobs 48 times, with zero duplicate
 history/latest regressions, crash-after-store recovery and stale-worker fencing.
+The public AWS/live flow, scheduled observations, real redelivery, CloudWatch
+publication and cloud pause/resume were also verified; see the release evidence.
 There are remaining development-dependency advisories; no major Tailwind rewrite
 was made for this release. Local fixtures do not prove the deployed IAM flow.
 
