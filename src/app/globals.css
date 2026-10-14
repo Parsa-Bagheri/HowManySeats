@@ -31,37 +31,24 @@ select {
   font: inherit;
 }
 
-.google-address-autocomplete {
-  display: block;
-  width: 100%;
+/* Keep mobile location suggestions in document flow: no full-screen dialog
+   anchored to the layout viewport while the iPhone keyboard pans the screen. */
+.location-suggestions {
   min-width: 0;
+  max-height: min(20rem, var(--location-suggestions-height, 40dvh));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-.google-address-autocomplete-clean {
-  min-height: 2.5rem;
-  color: #ffffff;
-  color-scheme: dark;
-  font-size: 1rem;
-  background-color: #1b1b1b;
-  border: 1px solid #404040;
-  border-radius: 0.375rem;
-}
-
-.google-address-autocomplete-fun {
-  min-height: 3rem;
-  color: #111111;
-  color-scheme: light;
-  font-size: 1rem;
-  font-weight: 900;
-  background-color: #fff8df;
-  border: 4px solid #111111;
-  border-radius: 0;
-  box-shadow: 6px 6px 0 #111111;
-}
-
-.google-address-autocomplete-clean::part(input),
-.google-address-autocomplete-fun::part(input) {
-  min-height: inherit;
+@media (min-width: 640px) and (hover: hover) and (pointer: fine) {
+  .location-suggestions {
+    position: absolute;
+    top: calc(100% - 1rem);
+    left: 0;
+    right: 0;
+    z-index: 40;
+    max-height: 20rem;
+  }
 }
 
 a {
