@@ -1449,6 +1449,8 @@ const SearchForm = memo(function SearchForm({
 
   return (
     <form className="grid gap-4" onSubmit={onSubmit}>
+      <AddressField mode={mode} value={location} onChange={setLocation} />
+
       <MovieTitleField
         mode={mode}
         value={movieTitle}
@@ -1499,8 +1501,6 @@ const SearchForm = memo(function SearchForm({
           ))}
         </select>
       </label>
-
-      <AddressField mode={mode} value={location} onChange={setLocation} />
 
       <TheatreTypeField
         mode={mode}
@@ -2115,10 +2115,10 @@ function CleanResultCard({ result }: { result: SearchResult }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-white">
-            {theatreHeading(result.theatre)}
+            {result.showtime.movieTitle}
           </h2>
           <p className="mt-1 font-semibold text-neutral-100">
-            {result.showtime.movieTitle}
+            {theatreHeading(result.theatre)}
           </p>
           <p className="mt-2 flex items-center gap-2 font-semibold text-neutral-100">
             <Clock className="h-4 w-4 text-emerald-300" aria-hidden="true" />
@@ -2348,10 +2348,10 @@ function FunResultCard({ result }: { result: SearchResult }) {
       <div className="chaos-card-head grid gap-3 p-4 lg:grid-cols-[1fr_auto]">
         <div className="min-w-0">
           <h2 className="text-[clamp(1.5rem,3.5vw,2.25rem)] font-black uppercase leading-none text-black">
-            {theatreHeading(result.theatre)}
+            {result.showtime.movieTitle}
           </h2>
           <p className="mt-2 text-lg font-black uppercase leading-tight">
-            {result.showtime.movieTitle}
+            {theatreHeading(result.theatre)}
           </p>
           <p className="mt-2 flex flex-wrap items-center gap-2 text-lg font-black uppercase leading-tight">
             <Clock className="h-5 w-5 text-[#00a651]" aria-hidden="true" />
