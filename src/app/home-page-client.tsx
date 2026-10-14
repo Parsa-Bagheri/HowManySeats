@@ -29,6 +29,7 @@ import {
   useState,
 } from "react";
 import AddressField, { type LocationCoordinates } from "@/app/address-field";
+import { WatchAction, WatchNavigation, WatchProvider } from "@/app/watch-controls";
 import {
   searchBrowserCinemas,
   suggestBrowserMovieTitles,
@@ -887,10 +888,11 @@ export default function HomePageClient({
     warning,
   };
 
-  return uiMode === "fun" ? (
-    <FunHomeView {...viewProps} />
-  ) : (
-    <CleanHomeView {...viewProps} />
+  return (
+    <WatchProvider>
+      <WatchNavigation />
+      {uiMode === "fun" ? <FunHomeView {...viewProps} /> : <CleanHomeView {...viewProps} />}
+    </WatchProvider>
   );
 }
 
@@ -2202,6 +2204,7 @@ function CleanResultCard({ result }: { result: SearchResult }) {
           </p>
         </div>
       </div>
+      <WatchAction screening={result} />
     </article>
   );
 }
@@ -2458,6 +2461,7 @@ function FunResultCard({ result }: { result: SearchResult }) {
           </div>
         </aside>
       </div>
+      <div className="px-4 pb-4"><WatchAction screening={result} fun /></div>
     </article>
   );
 }

@@ -1,0 +1,4 @@
+{
+  "app": "node --import tsx infra/app.ts",
+  "context": { "enableLive": "false", "enablePolling": "false" }
+}

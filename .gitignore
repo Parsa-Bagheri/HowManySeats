@@ -19,3 +19,11 @@ docs/screenshots/*.webp
 !.gitkeep
 
 .vercel
+.watch-data/
+cdk.out/
+
+cdk.*.out/
+.watch-release/
+
+.playwright-cli/
+output/playwright/

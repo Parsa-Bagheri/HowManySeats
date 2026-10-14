@@ -376,6 +376,23 @@ export class CineplexClient {
     return showtimes;
   }
 
+  /** Resolve watch metadata from the provider; browser titles, times and cinema names are never trusted. */
+  async resolveScreening(theatreId: string, showtimeId: string): Promise<SearchCandidate | undefined> {
+    const directory = await this.getJson<CineplexTheatresResponse>(`${THEATRICAL_API_BASE}/v1/theatres?language=en`);
+    const raw = [...(directory.favouriteTheatres ?? []), ...(directory.nearbyTheatres ?? []), ...(directory.otherTheatres ?? [])]
+      .find((theatre) => String(theatre.theatreId) === theatreId);
+    if (!raw) return undefined;
+    const theatre = toTheatre(raw);
+    const dateParts = new Intl.DateTimeFormat("en-CA", { timeZone: theatre.timeZone ?? "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(this.now());
+    for (let offset = 0; offset < 3; offset++) {
+      const date = new Date(`${dateParts}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + offset);
+      const showtime = (await this.getShowtimes(theatre, date.toISOString().slice(0, 10))).find((item) => item.providerShowtimeId === showtimeId);
+      if (showtime) return { theatre, showtime };
+    }
+    return undefined;
+  }
+
   async getSeatSnapshot(
     theatre: Theatre,
     showtime: Showtime,
@@ -399,7 +416,12 @@ export class CineplexClient {
       ),
     ]);
 
-    return buildSeatSnapshot(toRawSeats(layout, availability));
+    // Missing maps are unavailable, never an empty auditorium. Keep unknown status counts explicit.
+    const rawSeats = toRawSeats(layout, availability);
+    if (!rawSeats.length || !availability.seatAvailabilities || typeof availability.seatAvailabilities !== "object") {
+      throw new Error("Cineplex returned a malformed seat map.");
+    }
+    return buildSeatSnapshot(rawSeats, this.now());
   }
 
   async getSeatSnapshots(

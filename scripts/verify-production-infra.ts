@@ -1,0 +1,45 @@
+import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+
+type Resource = { Type: string; Properties: Record<string, any>; DeletionPolicy?: string; UpdateReplacePolicy?: string };
+const assembly = process.argv[2] ?? "cdk.production.out";
+const expectedState = process.argv[3] ?? "DISABLED";
+assert(["ENABLED", "DISABLED"].includes(expectedState));
+const manifest = JSON.parse(await readFile(`${assembly}/manifest.json`, "utf8"));
+assert.equal(manifest.artifacts.HowManySeatsWatchDemo.environment.split("/").at(-1), "us-east-2");
+const template = JSON.parse(await readFile(`${assembly}/HowManySeatsWatchDemo.template.json`, "utf8")) as { Resources: Record<string, Resource> };
+const entries = Object.entries(template.Resources);
+const resources = Object.values(template.Resources);
+const ofType = (type: string) => resources.filter((r) => r.Type === type);
+const schedule = ofType("AWS::Scheduler::Schedule")[0];
+assert.equal(schedule.Properties.State, expectedState);
+assert.equal(schedule.Properties.ScheduleExpression, "rate(5 minutes)");
+assert(Number.isFinite(Date.parse(schedule.Properties.EndDate)));
+const functions = ofType("AWS::Lambda::Function"); assert.equal(functions.length, 3);
+for (const fn of functions) {
+  const env = fn.Properties.Environment.Variables;
+  assert.equal(env.WATCH_MODE, "live"); assert.equal(env.WATCH_BACKEND, "aws"); assert.equal(env.WATCH_DEPLOYMENT, "production"); assert.equal(env.WATCH_AWS_REGION, "us-east-2");
+  assert.equal(env.WATCH_MAX_ACTIVE, "3"); assert.equal(env.WATCH_MAX_REGISTRATIONS, "6"); assert.equal(env.WATCH_POLLING_END_DATE, schedule.Properties.EndDate);
+  assert(!env.WATCH_AWS_ROLE_ARN, "Lambda uses its own execution role"); assert(!env.AWS_ACCESS_KEY_ID); assert(!env.AWS_SESSION_TOKEN);
+}
+const worker = entries.find(([id, r]) => id.startsWith("Collector") && r.Type === "AWS::Lambda::Function")![1];
+assert.equal(worker.Properties.ReservedConcurrentExecutions, 2); assert.equal(worker.Properties.Timeout, 30);
+const mapping = ofType("AWS::Lambda::EventSourceMapping")[0];
+assert.equal(mapping.Properties.BatchSize, 1); assert.deepEqual(mapping.Properties.FunctionResponseTypes, ["ReportBatchItemFailures"]); assert.deepEqual(mapping.Properties.ScalingConfig, { MaximumConcurrency: 2 });
+const table = ofType("AWS::DynamoDB::Table")[0];
+assert.deepEqual(table.Properties.OnDemandThroughput, { MaxReadRequestUnits: 64, MaxWriteRequestUnits: 256 }); assert.equal(table.DeletionPolicy, "Retain"); assert.equal(table.Properties.TimeToLiveSpecification.AttributeName, "expiresAt");
+assert.equal(ofType("AWS::Lambda::Url").length, 0); assert.equal(ofType("AWS::CloudWatch::Alarm").length, 3); assert.equal(ofType("AWS::Logs::MetricFilter").length, 4);
+const webUser = entries.find(([id, r]) => id.startsWith("VercelWatchService") && r.Type === "AWS::IAM::User")!;
+assert(webUser); assert.equal(webUser[1].Properties?.LoginProfile, undefined);
+assert.equal(ofType("AWS::IAM::AccessKey").length, 0, "Keys must not be embedded in templates or outputs");
+assert.equal(ofType("AWS::IAM::OIDCProvider").length, 0, "Account policy prohibits identity providers");
+const policy = entries.find(([id, r]) => id.startsWith("VercelWatchService") && r.Type === "AWS::IAM::Policy")![1];
+const statements = policy.Properties.PolicyDocument.Statement;
+assert.equal(statements.length, 3);
+assert.equal(statements[0].Action, "dynamodb:GetItem"); assert.equal(statements[1].Action, "dynamodb:PutItem"); assert.equal(statements[2].Action, "sqs:SendMessage");
+for (const statement of statements.slice(0, 2)) assert.deepEqual(statement.Condition["ForAllValues:StringLike"], { "dynamodb:LeadingKeys": ["production:registry", "production:watch:*"] });
+for (const statement of statements.slice(1)) assert.deepEqual(statement.Condition.DateLessThan, { "aws:CurrentTime": schedule.Properties.EndDate });
+assert(!JSON.stringify(policy).includes('"Resource":"*"')); assert(!JSON.stringify(policy).includes("sqs:ReceiveMessage")); assert(!JSON.stringify(policy).includes("lambda:InvokeFunction"));
+const report = { verifiedAt: new Date().toISOString(), kind: "local synthesis and assertions; no deployment", region: "us-east-2", scheduleState: expectedState, enforcedEndDate: schedule.Properties.EndDate, live: true, activeLimit: 3, registrationsPerHour: 6, concurrency: 2, functions: 3, alarms: 3, customMetrics: 4, namespace: "production:", webCredentials: "dedicated IAM user; namespace-scoped Get/Put, queue SendMessage; IAM write/send deadline; no console login", partialBatchFailures: true, dataRetentionOnRemoval: true };
+await writeFile(`${assembly}/verification.json`, JSON.stringify(report, null, 2) + "\n");
+console.log(JSON.stringify(report, null, 2));
