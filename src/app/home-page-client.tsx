@@ -1449,7 +1449,18 @@ const SearchForm = memo(function SearchForm({
 
   return (
     <form className="grid gap-4" onSubmit={onSubmit}>
-      <AddressField mode={mode} value={location} onChange={setLocation} />
+      <MovieTitleField
+        mode={mode}
+        value={movieTitle}
+        suggestions={movieSuggestions}
+        suggestionsLoading={movieSuggestionsLoading}
+        suggestionsOpen={movieSuggestionsOpen}
+        onBlur={onMovieTitleBlur}
+        onChange={setMovieTitle}
+        onFocus={onMovieTitleFocus}
+        onRequestClose={onMovieSuggestionsClose}
+        onSelect={onMovieSuggestionSelect}
+      />
 
       <DateRangeFields
         date={date}
@@ -1489,18 +1500,7 @@ const SearchForm = memo(function SearchForm({
         </select>
       </label>
 
-      <MovieTitleField
-        mode={mode}
-        value={movieTitle}
-        suggestions={movieSuggestions}
-        suggestionsLoading={movieSuggestionsLoading}
-        suggestionsOpen={movieSuggestionsOpen}
-        onBlur={onMovieTitleBlur}
-        onChange={setMovieTitle}
-        onFocus={onMovieTitleFocus}
-        onRequestClose={onMovieSuggestionsClose}
-        onSelect={onMovieSuggestionSelect}
-      />
+      <AddressField mode={mode} value={location} onChange={setLocation} />
 
       <TheatreTypeField
         mode={mode}
