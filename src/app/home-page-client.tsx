@@ -825,7 +825,12 @@ export default function HomePageClient({
 
   const onRefreshSeats = useCallback(() => {
     const applied = appliedSearchState.current;
-    if (!applied || discoveryInFlight.current || hydrationRunning.current) return;
+    if (
+      !applied ||
+      discoveredScopeKey.current === undefined ||
+      discoveryInFlight.current ||
+      hydrationRunning.current
+    ) return;
 
     const state = getSeatRefreshState(applied, latestSearchState.current);
     activeSearchId.current += 1;
@@ -1194,7 +1199,7 @@ function CleanHomeView(props: SearchViewProps) {
             </div>
 
             {hasSearched ? (
-              <SeatRefreshButton disabled={loading} refreshing={refreshing} onClick={onRefreshSeats} />
+              <SeatRefreshButton disabled={loading || Boolean(error)} refreshing={refreshing} onClick={onRefreshSeats} />
             ) : null}
 
             {error ? (
@@ -1397,7 +1402,7 @@ function FunHomeView(props: SearchViewProps) {
             </div>
 
             {hasSearched ? (
-              <SeatRefreshButton disabled={loading} refreshing={refreshing} onClick={onRefreshSeats} fun />
+              <SeatRefreshButton disabled={loading || Boolean(error)} refreshing={refreshing} onClick={onRefreshSeats} fun />
             ) : null}
 
             {error ? (
