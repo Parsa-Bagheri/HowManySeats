@@ -23,6 +23,8 @@ Cineplex or Landmark Cinemas.
 - Distance, start-time, and least-crowded-first sorting
 - Share submitted searches and result filters with native sharing or a copyable
   link; links restore the search form and seat availability may change
+- Explicit seat refresh with advancing freshness labels and retained snapshots
+  when a provider temporarily fails
 - Direct links to each cinema's public purchase flow and seat-map preview
 - Separate totals and occupied counts for standard, accessible, and companion
   seats
@@ -37,6 +39,13 @@ checks the relevant seat maps automatically in bounded batches, caches the
 results, and applies filters locally. It repeats discovery only when the
 location, radius, or dates change. If a provider or individual request is
 temporarily unavailable, the app warns that results may be partial.
+
+**Refresh seats** rechecks the currently authorized showtimes using the submitted
+location, dates, and radius with the current result filters. Edits to those scope
+fields stay staged until Search. Refresh retries failed seat checks and retains
+previous successful snapshots with their original check times if a retry fails.
+The first 500 eligible showtimes are authorized; only **Show more** extends that
+window. Refresh never adds authorization or starts background polling.
 
 The Cineplex client uses these read-only public-site `GET` endpoints:
 
