@@ -194,3 +194,16 @@ function makeResult(): SearchResult {
     },
   };
 }
+
+
+test("merged provider results rank checked occupancy ahead of unknown snapshots", async () => {
+  const base = makeResult();
+  const smaller = { ...base, snapshot: { ...base.snapshot, sellableSeats: 10, occupiedEstimate: 2 } };
+  const larger = { ...base, showtime: { ...base.showtime, id: "larger" }, snapshot: { ...base.snapshot, sellableSeats: 100, occupiedEstimate: 10 } };
+  const unknown = { ...base, showtime: { ...base.showtime, id: "unknown", startsAt: "2026-09-01T18:00:00.000Z" }, snapshot: undefined };
+  const search = new CinemaSearch([{ provider: "cineplex", client: {
+    search: async () => [unknown, smaller, larger],
+    suggestMovieTitles: async () => [],
+  } }]);
+  assert.deepEqual((await search.search({ ...query, sortBy: "occupancy-asc" })).results.map((r) => r.showtime.id), ["larger", base.showtime.id, "unknown"]);
+});

@@ -29,7 +29,7 @@ const searchSchema = searchAreaSchema.extend({
   nonVipOnly: booleanParam,
   accessibleAvailable: booleanParam,
   sortBy: z
-    .enum(["distance-asc", "distance-desc", "time-asc", "time-desc"])
+    .enum(["distance-asc", "distance-desc", "time-asc", "time-desc", "occupancy-asc"])
     .optional(),
 });
 
