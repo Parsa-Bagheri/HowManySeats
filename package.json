@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --import tsx --test src/app/api/cineplex-seats/route.test.ts src/app/api/watches/route.test.ts src/lib/watches/service.test.ts src/lib/watches/collector.test.ts src/lib/watches/aws.test.ts src/lib/browser-cinema-search.test.ts src/lib/cinema-search.test.ts src/lib/cineplex-client.test.ts src/lib/client-search-results.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/landmark-client.test.ts src/lib/landmark-titles.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts src/lib/watches/configuration.test.ts",
+    "test": "node --import tsx --test src/app/api/cineplex-seats/route.test.ts src/app/api/watches/route.test.ts src/lib/watches/service.test.ts src/lib/watches/collector.test.ts src/lib/watches/aws.test.ts src/lib/browser-cinema-search.test.ts src/lib/cinema-search.test.ts src/lib/cineplex-client.test.ts src/lib/client-search-results.test.ts src/lib/date-range.test.ts src/lib/experience-types.test.ts src/lib/landmark-client.test.ts src/lib/landmark-titles.test.ts src/lib/search-request.test.ts src/lib/search-state.test.ts src/lib/seat-scoring.test.ts src/lib/seat-refresh.test.ts src/lib/watches/configuration.test.ts",
     "typecheck": "tsc --noEmit",
     "watch:worker": "node --import tsx scripts/watch-service.ts worker",
     "watch:dispatcher": "node --import tsx scripts/watch-service.ts dispatcher",
