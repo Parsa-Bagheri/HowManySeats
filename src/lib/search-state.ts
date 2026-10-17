@@ -109,6 +109,28 @@ export function getSearchScopeKey(state: SearchState): string {
   });
 }
 
+/** Keep results and shared links tied to the last submitted scope. */
+export function getResultSearchState(
+  scope: SearchState | undefined,
+  current: SearchState,
+): SearchState {
+  if (!scope) {
+    return current;
+  }
+
+  if (getSearchScopeKey(scope) !== getSearchScopeKey(current)) {
+    return scope;
+  }
+
+  return {
+    ...scope,
+    experienceTypes: current.experienceTypes,
+    filters: current.filters,
+    movieTitle: current.movieTitle,
+    sortBy: current.sortBy,
+  };
+}
+
 export function normalizeSearchState(
   state: StoredSearchState,
   today = getLocalDateInputValue(),
