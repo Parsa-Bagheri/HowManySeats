@@ -109,6 +109,28 @@ export function getSearchScopeKey(state: SearchState): string {
   });
 }
 
+/** Keep results and shared links tied to the last submitted scope. */
+export function getResultSearchState(
+  scope: SearchState | undefined,
+  current: SearchState,
+): SearchState {
+  if (!scope) {
+    return current;
+  }
+
+  if (getSearchScopeKey(scope) !== getSearchScopeKey(current)) {
+    return scope;
+  }
+
+  return {
+    ...scope,
+    experienceTypes: current.experienceTypes,
+    filters: current.filters,
+    movieTitle: current.movieTitle,
+    sortBy: current.sortBy,
+  };
+}
+
 export function normalizeSearchState(
   state: StoredSearchState,
   today = getLocalDateInputValue(),
@@ -185,7 +207,8 @@ function parseSortOption(value: unknown): SortOption | undefined {
   return value === "distance-asc" ||
     value === "distance-desc" ||
     value === "time-asc" ||
-    value === "time-desc"
+    value === "time-desc" ||
+    value === "occupancy-asc"
     ? value
     : undefined;
 }

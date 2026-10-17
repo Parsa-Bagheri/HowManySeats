@@ -105,7 +105,7 @@ test("discovers an unfiltered showtime superset for local filtering", async (t) 
       startsInNextTwoHours: true,
     },
     movieTitle: "Example",
-    sortBy: "time-desc",
+    sortBy: "occupancy-asc",
   };
 
   t.after(() => {
@@ -139,6 +139,7 @@ test("discovers an unfiltered showtime superset for local filtering", async (t) 
   assert.equal(params.get("accessibleAvailable"), null);
   assert.equal(params.get("nonVipOnly"), null);
   assert.equal(params.get("sortBy"), null);
+  assert.equal(landmarkQuery?.sortBy, "distance-asc");
   assert.equal(landmarkQuery?.movieTitle, "");
   assert.deepEqual(landmarkQuery?.experienceTypes, []);
   assert.equal(landmarkQuery?.accessibleAvailable, false);

@@ -39,6 +39,7 @@ import {
   SeatSnapshotCache,
   selectSeatRefreshCandidates,
 } from "@/lib/seat-refresh";
+import { ShareSearch } from "@/app/share-search";
 import { WatchAction, WatchNavigation, WatchProvider } from "@/app/watch-controls";
 import {
   searchBrowserCinemas,
@@ -63,6 +64,7 @@ import {
   buildSearchParams,
   getEffectiveFilters,
   getLocalDateInputValue,
+  getResultSearchState,
   getSearchScopeKey,
   makeDefaultSearchState,
   normalizeSearchState,
@@ -173,7 +175,11 @@ const SORT_LABELS = {
   "distance-desc": "Farthest distance first",
   "time-asc": "Earliest time first",
   "time-desc": "Latest time first",
+  "occupancy-asc": "Least crowded first",
 } satisfies Record<SortOption, string>;
+
+const CROWDING_SORT_NOTE =
+  "Ranks checked showtimes by the share of standard seats occupied. Unchecked showtimes may be less crowded; choose Show more to check them.";
 
 const THEME_PROMPT_STORAGE_KEY = "how-many-seats-theme-prompt-seen";
 const UI_MODE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -1194,8 +1200,12 @@ function CleanHomeView(props: SearchViewProps) {
                     {activeFilterCount === 1 ? "" : "s"}
                   </p>
                   <p>{sortLabel(resultState.sortBy)}</p>
+                  {resultState.sortBy === "occupancy-asc" ? (
+                    <p className="mt-2 max-w-sm">{CROWDING_SORT_NOTE}</p>
+                  ) : null}
                 </div>
               </div>
+              <ShareSearch state={hasSearched && !error ? resultState : undefined} mode="clean" />
             </div>
 
             {hasSearched ? (
@@ -1397,6 +1407,10 @@ function FunHomeView(props: SearchViewProps) {
                       label={sortLabel(resultState.sortBy)}
                     />
                   </div>
+                  {resultState.sortBy === "occupancy-asc" ? (
+                    <p className="text-sm font-semibold">{CROWDING_SORT_NOTE}</p>
+                  ) : null}
+                  <ShareSearch state={hasSearched && !error ? resultState : undefined} mode="fun" />
                 </div>
               </div>
             </div>
@@ -2655,27 +2669,6 @@ function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
   return typeof action === "function"
     ? (action as (value: T) => T)(current)
     : action;
-}
-
-function getResultSearchState(
-  scope: SearchState | undefined,
-  current: SearchState,
-): SearchState {
-  if (!scope) {
-    return current;
-  }
-
-  if (getSearchScopeKey(scope) !== getSearchScopeKey(current)) {
-    return scope;
-  }
-
-  return {
-    ...scope,
-    experienceTypes: current.experienceTypes,
-    filters: current.filters,
-    movieTitle: current.movieTitle,
-    sortBy: current.sortBy,
-  };
 }
 
 function getResultViewSignature(state: SearchState): string {
