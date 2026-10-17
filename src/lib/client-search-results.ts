@@ -1,3 +1,4 @@
+import { compareCheckedCrowding, compareUncheckedShowtimes } from "./crowding-sort";
 import { showtimeMatchesExperienceTypes } from "./experience-types";
 import {
   getEffectiveFilters,
@@ -152,13 +153,19 @@ export function sortSearchResults(
   results: readonly SearchResult[],
   sortBy: SortOption,
 ): SearchResult[] {
-  return sortSearchCandidates(results, sortBy);
+  return sortBy === "occupancy-asc"
+    ? [...results].sort(compareCheckedCrowding)
+    : sortSearchCandidates(results, sortBy);
 }
 
 export function sortSearchCandidates<T extends SearchCandidate>(
   candidates: readonly T[],
   sortBy: SortOption,
 ): T[] {
+  if (sortBy === "occupancy-asc") {
+    return [...candidates].sort(compareUncheckedShowtimes);
+  }
+
   const direction = sortBy.endsWith("desc") ? -1 : 1;
 
   return [...candidates].sort((a, b) => {

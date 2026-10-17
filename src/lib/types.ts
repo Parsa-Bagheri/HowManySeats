@@ -1,7 +1,7 @@
 import type { ShowtimeExperienceType } from "./experience-types";
 
 export type SortOption =
-  "distance-asc" | "distance-desc" | "time-asc" | "time-desc";
+  "distance-asc" | "distance-desc" | "time-asc" | "time-desc" | "occupancy-asc";
 
 export type CinemaProvider = "cineplex" | "landmark";
 
@@ -37,6 +37,7 @@ export type SeatSnapshot = {
   unknownSeats?: number;
   /** Recognized unavailable/broken/house entries, excluded from sellable totals. */
   excludedSeats?: number;
+  /** Total sellable standard seats, excluding accessible and companion seats. */
   sellableSeats: number;
   occupiedEstimate: number;
   /** Total sellable wheelchair-accessible seats. */

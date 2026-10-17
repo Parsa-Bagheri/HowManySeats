@@ -20,7 +20,7 @@ Cineplex or Landmark Cinemas.
   D-BOX, ScreenX, Premiere, and 3D
 - Filters for empty showtimes, five-or-fewer occupied seats, showtimes starting
   within two hours, non-VIP showtimes, and accessible seating
-- Distance and start-time sorting
+- Distance, start-time, and least-crowded-first sorting
 - Share submitted searches and result filters with native sharing or a copyable
   link; links restore the search form and seat availability may change
 - Direct links to each cinema's public purchase flow and seat-map preview
@@ -75,6 +75,15 @@ The estimate comes from the current preview seat map:
 - The accessible-seating filter requires at least one open wheelchair space;
   an open companion seat alone doesn't satisfy it.
 - Broken, house, and unknown seat statuses are excluded from the estimate.
+
+Least crowded first ranks checked showtimes by occupied standard seats divided
+by total sellable standard seats, excluding accessible and companion seating.
+Showtimes with zero or unknown standard-seat capacity rank last. Equal ratios
+sort by occupied count, start time, distance, then showtime ID. This compares
+only checked showtimes; unchecked ones may be less crowded. It does not trigger
+extra checks: the initial authorization remains 500 showtimes, and **Show more**
+is required to authorize more. Before seat checks, candidates use start time,
+distance, then showtime ID because their crowding is unknown.
 
 Seat availability can change at any time. Treat the numbers as a snapshot, not
 as a guarantee from either cinema provider.

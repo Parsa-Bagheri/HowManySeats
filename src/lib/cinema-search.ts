@@ -1,3 +1,4 @@
+import { compareCheckedCrowding } from "./crowding-sort";
 import { CineplexClient } from "./cineplex-client";
 import { LandmarkClient } from "./landmark-client";
 import type {
@@ -131,6 +132,10 @@ function sortResults(
   results: SearchCandidate[],
   sortBy: SortOption,
 ): SearchCandidate[] {
+  if (sortBy === "occupancy-asc") {
+    return results.sort(compareCheckedCrowding);
+  }
+
   return results.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
     const primary = sortBy.startsWith("distance")

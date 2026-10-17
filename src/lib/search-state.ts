@@ -207,7 +207,8 @@ function parseSortOption(value: unknown): SortOption | undefined {
   return value === "distance-asc" ||
     value === "distance-desc" ||
     value === "time-asc" ||
-    value === "time-desc"
+    value === "time-desc" ||
+    value === "occupancy-asc"
     ? value
     : undefined;
 }

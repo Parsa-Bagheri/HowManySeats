@@ -7,9 +7,11 @@ import {
   SEARCH_RESULT_PAGE_SIZE,
   selectSearchCandidatesForHydration,
   shouldShowSeatFailureWarning,
+  sortSearchCandidates,
+  sortSearchResults,
 } from "./client-search-results";
 import { makeDefaultSearchState } from "./search-state";
-import type { SearchResult } from "./types";
+import type { SearchCandidate, SearchResult } from "./types";
 
 const TODAY = "2026-09-04";
 const NOW = new Date("2026-09-04T18:00:00.000Z");
@@ -348,6 +350,7 @@ function makeResult(
     occupiedCompanionSeats?: number;
     occupiedEstimate?: number;
     startsAt?: string;
+    sellableSeats?: number;
   } = {},
 ): SearchResult {
   const id = overrides.id ?? "example";
@@ -372,7 +375,7 @@ function makeResult(
       occupiedAccessibleSeats: overrides.occupiedAccessibleSeats ?? 0,
       occupiedCompanionSeats: overrides.occupiedCompanionSeats ?? 0,
       occupiedEstimate: overrides.occupiedEstimate ?? 0,
-      sellableSeats: 20,
+      sellableSeats: overrides.sellableSeats ?? 20,
     },
     theatre: {
       city: "Waterloo",
@@ -384,3 +387,77 @@ function makeResult(
     },
   };
 }
+
+
+test("least crowded compares standard-seat ratios, not raw occupied counts", () => {
+  const smaller = makeResult({ id: "smaller", occupiedEstimate: 2, sellableSeats: 10 });
+  const larger = makeResult({
+    id: "larger", occupiedEstimate: 10, sellableSeats: 100,
+    accessibleSeats: 20, occupiedAccessibleSeats: 20,
+    companionSeats: 20, occupiedCompanionSeats: 20,
+  });
+  const input = [smaller, larger];
+  const state = { ...makeDefaultSearchState(TODAY), sortBy: "occupancy-asc" as const };
+  assert.deepEqual(
+    filterAndSortSearchResults(input, state, NOW, TODAY).map((r) => r.showtime.id),
+    ["larger", "smaller"],
+  );
+  assert.deepEqual(input, [smaller, larger], "cached input order is immutable");
+});
+
+test("zero, unknown, and invalid standard-seat capacities rank after known occupancy", () => {
+  const zero = makeResult({ id: "zero", sellableSeats: 0 });
+  const unknown = makeResult({ id: "unknown", sellableSeats: Number.NaN });
+  const invalid = makeResult({ id: "invalid", sellableSeats: 10, occupiedEstimate: 11 });
+  const full = makeResult({ id: "full", sellableSeats: 20, occupiedEstimate: 20 });
+  const empty = makeResult({ id: "empty", sellableSeats: 20 });
+  assert.deepEqual(
+    sortSearchResults([zero, invalid, full, unknown, empty], "occupancy-asc")
+      .map((r) => r.showtime.id),
+    ["empty", "full", "unknown", "zero", "invalid"],
+  );
+});
+
+test("crowding ties resolve by occupied count, time, distance, then showtime ID", () => {
+  const results = [
+    makeResult({ id: "larger", occupiedEstimate: 10, sellableSeats: 100 }),
+    makeResult({ id: "late", occupiedEstimate: 2, sellableSeats: 20, startsAt: "2026-09-04T20:00:00.000Z" }),
+    makeResult({ id: "far", occupiedEstimate: 2, sellableSeats: 20, distanceKm: 5 }),
+    makeResult({ id: "b", occupiedEstimate: 2, sellableSeats: 20, distanceKm: 1 }),
+    makeResult({ id: "a", occupiedEstimate: 2, sellableSeats: 20, distanceKm: 1 }),
+  ];
+  const expected = ["a", "b", "far", "late", "larger"];
+  assert.deepEqual(sortSearchResults(results, "occupancy-asc").map((r) => r.showtime.id), expected);
+  assert.deepEqual(sortSearchResults([...results].reverse(), "occupancy-asc").map((r) => r.showtime.id), expected);
+});
+
+test("unchecked hydration candidates use time, distance, and ID without inferring occupancy", () => {
+  const early = makeResult({ id: "early", occupiedEstimate: 20 });
+  const unknown: SearchCandidate = { ...makeResult({ id: "unknown", startsAt: "2026-09-04T20:00:00.000Z" }), snapshot: undefined };
+  const empty = makeResult({ id: "empty", startsAt: "2026-09-04T21:00:00.000Z" });
+  assert.deepEqual(
+    sortSearchCandidates([empty, unknown, early], "occupancy-asc").map((r) => r.showtime.id),
+    ["early", "unknown", "empty"],
+  );
+  const sameTime = ["z", "a"].map((id) => ({ ...makeResult({ id }), snapshot: undefined }));
+  assert.deepEqual(sortSearchCandidates(sameTime, "occupancy-asc").map((r) => r.showtime.id), ["a", "z"]);
+});
+
+test("least crowded sorting preserves the 500 authorizations until explicit Show more", () => {
+  const state = { ...makeDefaultSearchState(TODAY), sortBy: "occupancy-asc" as const };
+  const candidates: SearchCandidate[] = Array.from({ length: 503 }, (_, index) => ({
+    ...makeResult({ id: `candidate-${String(index).padStart(3, "0")}`, distanceKm: index + 1 }),
+    snapshot: undefined,
+  }));
+  const initial = selectSearchCandidatesForHydration(candidates, state, new Set(), 500, NOW, TODAY);
+  assert.equal(initial.newlyAuthorizedCandidates.length, 500);
+  assert.equal(initial.remainingCount, 3);
+  assert.equal(initial.authorizedCandidates[0]?.showtime.id, "candidate-000");
+  assert.equal(initial.authorizedCandidates.at(-1)?.showtime.id, "candidate-499");
+  const ids = new Set(initial.authorizedCandidates.map((c) => c.showtime.id));
+  const changed = selectSearchCandidatesForHydration(candidates, { ...state, movieTitle: "example" }, ids, 500, NOW, TODAY);
+  assert.equal(changed.newlyAuthorizedCandidates.length, 0);
+  assert.equal(changed.remainingCount, 3);
+  const more = selectSearchCandidatesForHydration(candidates, state, ids, 1000, NOW, TODAY);
+  assert.equal(more.newlyAuthorizedCandidates.length, 3);
+});

@@ -84,3 +84,14 @@ test("search scope changes only for location, coordinates, radius, or dates", ()
   assert.notEqual(getSearchScopeKey({ ...state, radiusKm: "50" }), key);
   assert.notEqual(getSearchScopeKey({ ...state, endDate: "2026-08-31" }), key);
 });
+
+
+test("round-trips and normalizes least-crowded sorting without changing discovery scope", () => {
+  const original = { ...makeDefaultSearchState(TODAY), location: "Toronto", sortBy: "occupancy-asc" as const };
+  const parsed = readSearchStateFromUrl(`?${buildSearchParams(original)}`);
+  assert.equal(parsed?.sortBy, "occupancy-asc");
+  assert.deepEqual(normalizeSearchState(parsed ?? {}, TODAY), original);
+  assert.equal(normalizeSearchState(JSON.parse(JSON.stringify(original)), TODAY).sortBy, "occupancy-asc");
+  assert.equal(getSearchScopeKey(original), getSearchScopeKey({ ...original, sortBy: "distance-asc" }));
+  assert.equal(normalizeSearchState({ ...original, sortBy: "invalid" as never }, TODAY).sortBy, "distance-asc");
+});

@@ -1,3 +1,4 @@
+import { compareCheckedCrowding, compareUncheckedShowtimes } from "./crowding-sort";
 import { getSearchDates } from "./date-range";
 import {
   distanceKm,
@@ -845,6 +846,10 @@ function sortResults(
   results: SearchCandidate[],
   sortBy: SortOption,
 ): SearchCandidate[] {
+  if (sortBy === "occupancy-asc") {
+    return results.sort(compareCheckedCrowding);
+  }
+
   return results.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
     const primary = sortBy.startsWith("distance")
@@ -862,6 +867,10 @@ function sortShowtimeCandidates(
   candidates: ShowtimeCandidate[],
   sortBy: SortOption,
 ): ShowtimeCandidate[] {
+  if (sortBy === "occupancy-asc") {
+    return candidates.sort(compareUncheckedShowtimes);
+  }
+
   return candidates.sort((a, b) => {
     const direction = sortBy.endsWith("desc") ? -1 : 1;
 
