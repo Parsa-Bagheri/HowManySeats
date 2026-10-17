@@ -29,6 +29,7 @@ import {
   useState,
 } from "react";
 import AddressField, { type LocationCoordinates } from "@/app/address-field";
+import { ShareSearch } from "@/app/share-search";
 import { WatchAction, WatchNavigation, WatchProvider } from "@/app/watch-controls";
 import {
   searchBrowserCinemas,
@@ -53,6 +54,7 @@ import {
   buildSearchParams,
   getEffectiveFilters,
   getLocalDateInputValue,
+  getResultSearchState,
   getSearchScopeKey,
   makeDefaultSearchState,
   normalizeSearchState,
@@ -1154,6 +1156,7 @@ function CleanHomeView(props: SearchViewProps) {
                   ) : null}
                 </div>
               </div>
+              <ShareSearch state={hasSearched && !error ? resultState : undefined} mode="clean" />
             </div>
 
             {error ? (
@@ -1352,6 +1355,7 @@ function FunHomeView(props: SearchViewProps) {
                   {resultState.sortBy === "occupancy-asc" ? (
                     <p className="text-sm font-semibold">{CROWDING_SORT_NOTE}</p>
                   ) : null}
+                  <ShareSearch state={hasSearched && !error ? resultState : undefined} mode="fun" />
                 </div>
               </div>
             </div>
@@ -2616,27 +2620,6 @@ function resolveStateAction<T>(action: SetStateAction<T>, current: T): T {
   return typeof action === "function"
     ? (action as (value: T) => T)(current)
     : action;
-}
-
-function getResultSearchState(
-  scope: SearchState | undefined,
-  current: SearchState,
-): SearchState {
-  if (!scope) {
-    return current;
-  }
-
-  if (getSearchScopeKey(scope) !== getSearchScopeKey(current)) {
-    return scope;
-  }
-
-  return {
-    ...scope,
-    experienceTypes: current.experienceTypes,
-    filters: current.filters,
-    movieTitle: current.movieTitle,
-    sortBy: current.sortBy,
-  };
 }
 
 function getResultViewSignature(state: SearchState): string {

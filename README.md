@@ -21,6 +21,8 @@ Cineplex or Landmark Cinemas.
 - Filters for empty showtimes, five-or-fewer occupied seats, showtimes starting
   within two hours, non-VIP showtimes, and accessible seating
 - Distance, start-time, and least-crowded-first sorting
+- Share submitted searches and result filters with native sharing or a copyable
+  link; links restore the search form and seat availability may change
 - Direct links to each cinema's public purchase flow and seat-map preview
 - Separate totals and occupied counts for standard, accessible, and companion
   seats
